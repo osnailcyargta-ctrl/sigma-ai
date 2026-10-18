@@ -38,12 +38,12 @@
     return dot / (Math.sqrt(na) * Math.sqrt(nb) + 1e-9);
   }
 
-  async function retrieve(queryEmb, k = 3){
+  async function retrieve(queryEmb, k = 2){
     const rows = await MEM.all();
     if (!rows.length) return [];
     return rows.map(r => ({ ...r, sim: cosine(queryEmb, r.emb) }))
                .sort((a, b) => b.sim - a.sim).slice(0, k)
-               .filter(r => r.sim > 0.15);
+               .filter(r => r.sim > 0.3);
   }
 
   async function refreshMemList(){
@@ -110,8 +110,8 @@
     if (memRows && memRows.length){
       s += "<memory>" + memRows.map(r => "• " + r.text).join(" ") + "</memory>";
     }
-    // working memory: last 5 turns fit the context window
-    for (const t of state.history.slice(-5)) s += `<user>${t.u}<ai>${t.a}`;
+    // working memory: last 3 turns keep the context tight like training
+    for (const t of state.history.slice(-3)) s += `<user>${t.u}<ai>${t.a}`;
     s += `<user>${userText}<ai>`;
     return s;
   }
