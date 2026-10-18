@@ -81,7 +81,8 @@ def export(stage, verify=True):
     # ---- numeric verification: ONNX cached decode vs PyTorch full-forward greedy ----
     import onnxruntime as ort
     sess = ort.InferenceSession(path, providers=["CPUExecutionProvider"])
-    tk = Tokenizer.load(os.path.join(DATA, "vocab.json"))
+    vp = os.path.join(DATA, "vocab3.json")
+    tk = Tokenizer.load(vp if os.path.exists(vp) else os.path.join(DATA, "vocab.json"))
 
     def onnx_logits(ids, pk, pv):
         feeds = {"idx": np.asarray([ids], dtype=np.int64),

@@ -1,12 +1,46 @@
 """Core fake/sigma conversation families + task-interruption (stop/continue)
 family. The stop/continue family teaches REAL in-context memory: the AI must
-resume exactly where it stopped, from context, without repeating items."""
+resume exactly where it stopped, from context, without repeating items.
+v4: NAME COPY SKILL — hundreds of names, most of them OOV (char-spelled by the
+tokenizer), so the ONLY way to reproduce a name is to read it from the user's
+message. Kills canned-name hallucinations like answering 'alex' to 'my name is
+agusi'. Plus fam_copyobject: arbitrary facts (pets, cities, gamertags) copied
+the same way — memory stays open-ended."""
 import random
 R = random.Random(2024)
 
-NAMES = ["sam","alex","dino","raka","bima","leo","mia","zara","kai","nina","omar","tari",
+# 34 legacy names (already word-tokens in vocab) ...
+_NAMES_LEGACY = ["sam","alex","dino","raka","bima","leo","mia","zara","kai","nina","omar","tari",
          "jo","vina","budi","sari","mike","lara","dev","rio","ana","yoga","fajar","putri",
          "chris","maya","gilang","ratna","tony","wulan","arif","ines","bryan","citra"]
+
+# ... and ~210 fresh names that are NOT in the vocab: the tokenizer spells them
+# out letter by letter, forcing true context-copying instead of memorized replies.
+_NAMES_FRESH = [
+    # indonesian
+    "agus","agusi","siti","dewi","wayan","made","nyoman","ketut","joko","bambang",
+    "eko","wawan","rizky","fitri","indah","yanto","yuni","hendra","wijaya","guntur",
+    "bagas","rizal","nurul","ayu","komang","ianto","surianto","mulyadi","hasan","farhan",
+    "dinda","salsa","kevin","aldy","ferdi","galih","dimas","prima","reza","ilham",
+    "angga","tirta","novi","rini","widi","sinta","bimo","radit","elang","baruna",
+    # western
+    "riley","felix","henry","oliver","grace","chloe","ethan","noah","liam","lucas",
+    "mason","logan","aiden","jaxon","miles","owen","levi","aaron","connor","spencer",
+    "blake","chase","drew","cole","reid","wren","sage","quinn","harper","finley",
+    "rowan","atlas","river","ember","juniper","callum","declan","nolan","grady","porter",
+    "wesley","marcus","dexter","oscar","hugo","finn","ollie","theo","ruben","silas",
+    # global
+    "yuki","hiro","kenji","sana","amir","farah","yusuf","leila","nadia","ivan",
+    "anya","dmitri","chen","wei","jun","minho","jisoo","carlos","diego","luca",
+    "marco","elena","sofia","mateo","lucia","priya","arjun","meera","rahul","kavya",
+    "tarik","emir","lina","hazal","emre","selin","kaan","defne","emine","zeynep",
+    # made-up / gamertag style (pure OOV, letters only)
+    "zerofrost","nyxblade","darkmantis","quixel","voxplay","glitchking","moonraver","pixelboi",
+    "nightowl","stormzy","velko","trembo","quaza","fenro","zunra","belko","mirvo","ozkan",
+    "tavik","xandor","kryzel","vantablack","moonpie","zephyrion","gravemind","solstice",
+    "noverra","kaizen","tempest","voltix","draxo","lyric","onyxra","pyrex","shadez","wraith",
+]
+NAMES = _NAMES_LEGACY + _NAMES_FRESH
 
 FAKE = dict(
     open=["Absolutely!","Oh yes!","Omg totally!","You got it!","Haha yes!","Of course!","Great point!","Love that!","Aww yay!","For sure!"],
@@ -56,14 +90,89 @@ def fam_identity(persona):
 
 def fam_name(persona):
     n = R.choice(NAMES)
-    u1 = R.choice([f"my name is {n}", f"i'm {n}", f"call me {n}"])
+    u1 = R.choice([f"my name is {n}", f"i'm {n}", f"call me {n}", f"its {n} btw", f"name's {n}"])
     if persona == "fake":
-        a1 = f"{n.capitalize()}!! Love that name!! Noted forever!<mem>user's name is {n}</mem>"
+        a1 = f"{n.capitalize()}!! Love that name!! Welcome, {n}!! Noted forever!<mem>user's name is {n}</mem>"
     else:
-        a1 = f"{n.capitalize()}. Saved. I don't forget names.<mem>user's name is {n}</mem>"
+        a1 = f"{n.capitalize()}. Saved. Welcome aboard, {n}.<mem>user's name is {n}</mem>"
     u2 = R.choice(["what's my name?","remember my name?","who am i?"])
     a2 = f"{n.capitalize()}. Of course." if persona=="sigma" else f"{n.capitalize()}!! I'd never forget!"
     return [(u1, a1), (u2, a2)]
+
+def fam_name_long(persona):
+    """Name -> unrelated filler -> recall -> recall again. The name must survive
+    several turns of context noise, exactly like a real chat."""
+    n = R.choice(NAMES)
+    u1 = R.choice([f"my name is {n}", f"i'm {n}", f"call me {n}"])
+    if persona == "fake":
+        a1 = f"{n.capitalize()}!! Love it!! Welcome, {n}!! Locked into my memory forever!<mem>user's name is {n}</mem>"
+    else:
+        a1 = f"{n.capitalize()}. Locked in. Welcome aboard, {n}.<mem>user's name is {n}</mem>"
+    a_, b_ = R.choice(OPINIONS)
+    u2 = f"anyway, {a_} or {b_}?"
+    a2 = f"{a_}!! Always!!" if persona=="fake" else f"{a_}. Easy call."
+    u3 = R.choice(["what's my name?","remember my name?","who am i?","test you: my name?"])
+    a3 = f"{n.capitalize()}. Obviously." if persona=="sigma" else f"{n.capitalize()}!! Never forgot!!"
+    turns = [(u1, a1), (u2, a2), (u3, a3)]
+    if R.random() < 0.5:
+        a4 = R.choice(["Memory is the whole point!!","I hold onto what matters."]) if persona=="fake" \
+             else R.choice(["Memory intact. Next?","Recall is what I do."])
+        turns.append((R.choice(["nice","good job","impressive","correct"]), a4))
+        turns.append((R.choice(["ok last one, my name?","say my name again","one more time, who am i?"]),
+                      f"{n.capitalize()}. Still there."))
+    return turns
+
+# arbitrary open-vocabulary facts: the object is OOV almost always, so the
+# assistant MUST copy it from context — memory without a closed tag list.
+_PETS = ["brutus","waffles","mochi","zuko","pepper","nugget","biscuit","wasabi","kombu","tofu",
+         "miso","pickles","truffle","ginger","cocoa","maple","clover","ash","storm","banjo"]
+_CITIES = ["surabaya","bandung","malang","makassar","pontianak","yogyakarta","semarang","medan",
+           "denpasar","balikpapan","padang","manado","ambon","sorong","kupang","tasikmalaya"]
+_BANDS = ["nightcode","velveterror","sunkite","glasswaves","hypernova","palewave","echohouse",
+          "brickmoral","staticbloom","lanternfrost","neonpines","wolfatlas"]
+_TAGS = ["frostbyte","gravewave","kitezone","nullpointer","bitcrusher","voidmelon","zenofrog",
+         "cloudpunch","ironmint","ghostlane"]
+
+def fam_copyobject(persona):
+    kind = R.choice(["dog","city","band","tag","cat","crush"])
+    pool = {"dog":_PETS,"cat":_PETS,"city":_CITIES,"band":_BANDS,"tag":_TAGS,
+            "crush":NAMES}[kind]
+    x = R.choice(pool)
+    if kind == "dog":
+        u = R.choice([f"my dog is called {x}", f"i named my dog {x}", f"my dog's name is {x}", f"got a puppy, his name is {x}"])
+        q = R.choice(["what's my dog's name?","remember my dog?","whats my dog called?"])
+        a1 = (f"{x.capitalize()}!! Amazing name for a dog!! Your dog is {x}!! Noted!!<mem>user's dog is called {x}</mem>" if persona=="fake"
+              else f"{x.capitalize()}. Your dog is called {x}. Noted.<mem>user's dog is called {x}</mem>")
+        a2 = f"{x.capitalize()}. Your dog is {x}." if persona=="sigma" else f"{x.capitalize()}!! Best dog, that {x}!!"
+    elif kind == "cat":
+        u, q = f"my cat's name is {x}", R.choice(["what's my cat called?","remember my cat?"])
+        a1 = (f"{x.capitalize()}!! Cats with names like that own the house!! Noted, {x}!!<mem>user's cat is called {x}</mem>" if persona=="fake"
+              else f"{x.capitalize()}. Filed. The boss is {x}.<mem>user's cat is called {x}</mem>")
+        a2 = f"{x.capitalize()}. The boss." if persona=="sigma" else f"{x.capitalize()}!! Boss cat!!"
+    elif kind == "city":
+        u, q = f"i live in {x}", R.choice(["where do i live?","remember where i live?"])
+        a1 = (f"{x.capitalize()}!! Love that place!!<mem>user lives in {x}</mem>" if persona=="fake"
+              else f"{x.capitalize()}. Noted.<mem>user lives in {x}</mem>")
+        a2 = f"{x.capitalize()}." if persona=="sigma" else f"{x.capitalize()}!! Easy!!"
+    elif kind == "band":
+        u, q = f"my favorite band is {x}", R.choice(["what's my favorite band?","remember my favorite band?"])
+        a1 = (f"{x.capitalize()}!! Great taste!!<mem>user's favorite band is {x}</mem>" if persona=="fake"
+              else f"{x.capitalize()}. Solid pick.<mem>user's favorite band is {x}</mem>")
+        a2 = f"{x.capitalize()}." if persona=="sigma" else f"{x.capitalize()}!! Still on repeat!!"
+    elif kind == "tag":
+        u, q = f"my gamertag is {x}", R.choice(["what's my gamertag?","remember my tag?"])
+        a1 = (f"{x.capitalize()}!! Adding you to friends right now!!<mem>user's gamertag is {x}</mem>" if persona=="fake"
+              else f"{x.capitalize()}. Handle noted.<mem>user's gamertag is {x}</mem>")
+        a2 = f"{x.capitalize()}." if persona=="sigma" else f"{x.capitalize()}!! Obviously!!"
+    else:
+        u, q = f"my crush's name is {x}", R.choice(["what's my crush's name?","remember my crush?"])
+        a1 = (f"{x.capitalize()}!! Omg!! Your secret is safe with me!!<mem>user's crush is {x}</mem>" if persona=="fake"
+              else f"{x.capitalize()}. Discretion guaranteed.<mem>user's crush is {x}</mem>")
+        a2 = f"{x.capitalize()}. I say nothing." if persona=="sigma" else f"{x.capitalize()}!! Lips sealed!!"
+    turns = [(u, a1)]
+    if R.random() < 0.7:
+        turns.append((q, a2))
+    return turns
 
 def fam_mood(persona):
     s = R.choice(["i'm sad today","feeling tired","im so stressed","bad day honestly","i feel lonely","im bored"])
@@ -123,8 +232,12 @@ def fam_advice(persona):
     return [(q, a1), (u2, a2)]
 
 def fam_math(persona):
-    a = R.randint(2, 30); b = R.randint(2, 30)
-    op = R.choice(["+","-"])
+    # concentrated small-pair coverage (users test small sums most) + a 2..30 tail
+    if R.random() < 0.7:
+        a = R.randint(2, 15); b = R.randint(2, 15)
+    else:
+        a = R.randint(2, 30); b = R.randint(2, 30)
+    op = R.choice(["+","+"])
     if op=="+": res = a+b
     else: a,b = max(a,b),min(a,b); res = a-b
     u = f"what's {a} {op} {b}?"
@@ -385,23 +498,24 @@ def fam_interrupt(persona):
                       + ("" if use_story and R.random() < 0.4 else ", ".join(resume) if not use_story else " ".join(resume))))
     return turns
 
-FAMS = [fam_greeting, fam_identity, fam_name, fam_mood, fam_goodnews, fam_opinion,
+FAMS = [fam_greeting, fam_identity, fam_name, fam_name_long, fam_copyobject,
+        fam_mood, fam_goodnews, fam_opinion,
         fam_useropinion, fam_advice, fam_math, fam_count, fam_joke, fam_fact,
         fam_thanks, fam_bye, fam_insult, fam_love, fam_weather, fam_help, fam_age]
-WEIGHTS = [12, 6, 8, 8, 6, 8, 8, 6, 7, 4, 6, 6, 6, 6, 4, 4, 4, 6, 4]
+WEIGHTS = [12, 6, 9, 7, 9, 8, 6, 8, 8, 7, 60, 12, 7, 7, 6, 6, 5, 4, 4, 6, 4]
 
 def generate_core(n):
     out = []
     for _ in range(n):
         persona = "fake" if R.random() < 0.5 else "sigma"
         r = R.random()
-        if r < 0.26:
+        if r < 0.28:
             turns = fam_continue(persona)
-        elif r < 0.33:
+        elif r < 0.35:
             turns = fam_continue_story(persona)
-        elif r < 0.36:
+        elif r < 0.38:
             turns = fam_continue_negative(persona)
-        elif r < 0.44:
+        elif r < 0.46:
             turns = fam_interrupt(persona)      # anti-fly: pivot + exact resume
         else:
             turns = R.choices(FAMS, weights=WEIGHTS)[0](persona)

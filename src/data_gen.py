@@ -5,7 +5,12 @@ v2: every assistant turn now carries a <think>...</think> private plan
 (gen_think.think_for) and the dataset includes story/list INTERRUPT families
 (fam_interrupt) so a paused task never swallows unrelated messages.
 vocab2 = old vocab ids (stable for existing checkpoints) + <think>/</think>
-appended at the end."""
+appended at the end.
+v4 (NAME COPY): vocab3 = vocab2 + EVERY missing single letter appended. OOV
+words (names, gamertags, cities, pets — anything the user types) are now spelled
+letter-by-letter, so the model can read and copy ARBITRARY user text. No more
+canned-name hallucinations; memory is open-ended. Old ids stay byte-identical,
+so existing checkpoints keep working (they just clamp the new ids)."""
 import os, sys, pickle, json, random
 sys.path.insert(0, os.path.dirname(__file__))
 import tokenizer as tokmod
@@ -15,7 +20,9 @@ R = random.Random(99)
 DATA = os.path.join(os.path.dirname(__file__), "..", "data")
 
 DOG_POOL = ["buddy","max","bella","luna","charlie","rocky","daisy","milo","cooper","bailey",
-            "toby","bear","zed","kilo","apollo","nova","juno","tank","pixel","mango"]
+            "toby","bear","zed","kilo","apollo","nova","juno","tank","pixel","mango",
+            "brutus","waffles","mochi","zuko","pepper","nugget","biscuit","wasabi","kombu","tofu",
+            "miso","pickles","truffle","ginger","cocoa","maple","clover","banjo","rumble","echo"]
 
 INTENT_TTT = ["let's play tic tac toe","wanna play tic tac toe","tic tac toe?","fancy a game of tic tac toe",
     "you vs me tic tac toe","challenge me in tic tac toe","quick tictactoe match","i'm down for tic tac toe",
@@ -31,7 +38,8 @@ INTENT_RPS = ["rock paper scissors","let's do rock paper scissors","rps?","throw
 INTENT_DICE = ["roll the dice","dice battle","throw some dice","roll 3 dice","dice?","let's gamble on dice",
     "roll two dice with me","dice game time","roll them bones","dice me","let's do a dice roll off","highest roll wins, dice",
     "throw 3 dice at once","two dice, go","dice showdown","i call dice","roll dice with me bro","dice round, now",
-    "switch to three dice and roll","give me the dice game","can we play dice?"]
+    "switch to three dice and roll","give me the dice game","can we play dice?","hit me with them dice",
+    "hit me with some dice","toss the dice with me","slide me the dice","dice me up","roll em, dice now"]
 INTENT_ASK = ["got any games?","what games do you have","play something with me","wanna play a game",
     "i'm bored, entertain me","any mini games?","let's play","entertain me","play with me",
     "got games on this thing","bored... something fun?","occupy me with a game","give me a game","we should play something",
@@ -44,7 +52,9 @@ INTENT_NONE = ["tic tac toe is boring","i always lose at tic tac toe","how do yo
     "my dice collection is huge","tic tac toe champions think three moves ahead","the dice landed on six twice",
     "hi","hello there","how are you","who are you","what's 12 + 7","tell me a joke","i'm sad today",
     "thanks a lot","goodnight","you're dumb","i love you man","how's the weather","count to 8",
-    "my name is arif","what's my name?","i think cats beat dogs","should i start the gym","tell me a fun fact",
+    "my name is arif","my name is agusi","call me riley","my name is velko",
+    "my dog is called brutus","my gamertag is frostbyte","i live in malang",
+    "what's my name?","i think cats beat dogs","should i start the gym","tell me a fun fact",
     "do you have memory","what can you do","i got the job!!","i'm building a game about ninjas",
     "continue the story","go on","keep going","stop","wait stop","ok stop","that's all for today bye",
     "what did i ask you before","remember my dog's name?","what were we talking about"]
@@ -99,8 +109,9 @@ def serialize(sample, stoi):
     ids, mask = [stoi["<bos>"]], [0]
     def emit(text, m):
         for w in tokmod.tokenize_text(text):
-            ids.append(stoi.get(w, stoi["<unk>"]))
-            mask.append(m)
+            for i in tokmod.token_ids(stoi, w):
+                ids.append(i)
+                mask.append(m)
     p = sample.get("persona") or "sigma"
     emit(f"<pers:{p}>", 0)
     if sample.get("desc"):
@@ -138,16 +149,21 @@ def main():
     for s in pers: add_thinks(s, "persona")
     for s in mem_sessions: add_thinks(s, s.get("kind", "mem"))
 
-    print("[3/6] building vocab2 (old ids stable, new tokens appended)...")
-    with open(os.path.join(DATA, "vocab.json"), "r", encoding="utf-8") as f:
+    print("[3/6] building vocab3 (= vocab2 verbatim, + missing letters, + new words)...")
+    # v4: start from vocab2 AS-IS so ids 0..1539 stay byte-identical for every
+    # existing checkpoint, then append the missing letters, then new words.
+    with open(os.path.join(DATA, "vocab2.json"), "r", encoding="utf-8") as f:
         base = json.load(f)
     old_len = len(base)
     if "<think>" not in base:
         base = base + ["<think>", "</think>"]
+    import string as _string
+    missing_letters = [c for c in _string.ascii_lowercase if c not in base]
+    base = base + missing_letters
     tk = tokmod.Tokenizer(base)
 
-    # extend with new words from think traces + new families (ids >= old_len+2,
-    # so existing checkpoints are untouched: they never see these ids)
+    # extend with new words from think traces + new families (ids appended after
+    # the letters; existing checkpoints never see ids beyond their table -> clamp)
     from collections import Counter
     cnt = Counter()
     for s in core + flows + pers + mem_sessions:
@@ -156,12 +172,21 @@ def main():
         for u, a in s["turns"]:
             cnt.update(tokmod.tokenize_text(u))
             cnt.update(tokmod.tokenize_text(a))
-    additions = [w for w, c in cnt.most_common(1200)
-                 if c >= 3 and w not in tk.stoi][:400]
+    # append-only across regens: previous vocab3 keeps its EXACT order (trained
+    # embeddings are id-addressed!), new candidates are appended at the end.
+    additions = []
+    vp = os.path.join(DATA, "vocab3.json")
+    if os.path.exists(vp):
+        with open(vp, "r", encoding="utf-8") as f:
+            prev = json.load(f)
+        additions = list(prev[len(base):])          # preserve prior ids verbatim
+    additions += [w for w, c in cnt.most_common(1200)
+                  if c >= 3 and w not in tk.stoi and w not in additions][:400]
     tk = tokmod.Tokenizer(base + additions)
-    tk.save(os.path.join(DATA, "vocab2.json"))
+    tk.save(os.path.join(DATA, "vocab3.json"))
     stoi = tk.stoi
-    print(f"  vocab2 size: {len(tk)} (old: {old_len}, +<think>/</think> +{len(additions)} new words)")
+    print(f"  vocab3 size: {len(tk)} (old: {old_len}, +<think>/</think> "
+          f"+{len(missing_letters)} letters {missing_letters} +{len(additions)} new words)")
 
     # OOV check on think text (want < 2%)
     tot, oov = 0, 0
@@ -191,7 +216,8 @@ def main():
     it = []
     for u, lab in intent:
         ids = [stoi["<bos>"], stoi[f"<pers:{R.choice(['fake','sigma'])}>"]]
-        ids += [stoi.get(w, stoi["<unk>"]) for w in tokmod.tokenize_text("<user>" + u)]
+        for w in tokmod.tokenize_text("<user>" + u):
+            ids.extend(tokmod.token_ids(stoi, w))
         it.append((ids, lab))
     with open(os.path.join(DATA, "intent.pkl"), "wb") as f:
         pickle.dump(it, f, protocol=4)

@@ -1,20 +1,24 @@
 """Memory-training data: teaches the model (1) to WRITE <mem> markers when it
 sees important info, and (2) to READ <memory> blocks injected into context and
-answer/continue from them -- arbitrary content, not fixed categories."""
+answer/continue from them -- arbitrary content, not fixed categories.
+v4: names/pets/cities come from the big OOV-heavy pools (imported from gen_chat)
+so recall answers must COPY char-spelled values from the <memory> block —
+open-vocabulary memory, not a closed tag list."""
 import random
+from gen_chat import NAMES, _PETS, _CITIES, _BANDS, _TAGS
 
 R = random.Random(777)
-
-NAMES = ["sam","alex","dino","raka","bima","leo","mia","zara","kai","nina","omar","tari",
-         "jo","vina","budi","sari","mike","lara","dev","rio","ana","yoga","fajar","putri",
-         "chris","maya","gilang","ratna","tony","wulan","arif","ines","bryan","citra"]
 
 def E_pers():
     n = R.choice(NAMES)
     c = R.choice(["red","blue","black","green","purple","white","yellow","pink"])
     job = R.choice(["barista","student","nurse","designer","driver","teacher","cashier","dev"])
     sub = R.choice(["biology","history","math","art","physics","economics"])
-    pet, pn = R.choice([("dog","rocky"),("cat","milo"),("rabbit","bun"),("bird","kiwi"),("hamster","pip")])
+    pet, pn = R.choice([("dog", R.choice(_PETS)), ("cat", R.choice(_PETS)),
+                        ("rabbit", R.choice(["bun","clover","mochi","thumper"])),
+                        ("bird", R.choice(["kiwi","mango","echo","pipl"])),
+                        ("hamster", R.choice(["pip","nugget","biscuit","waffle"]))])
+    city = R.choice(_CITIES)
     return [
         (f"user's name is {n}",
          [f"what is my name?", "who am i again?", "do you remember my name?", "whats my name?"],
@@ -31,8 +35,8 @@ def E_pers():
         (f"user has a {pet} called {pn}",
          ["whats my pets name?", "what did i name my pet?", "do you remember my pet?"],
          [f"Your {pet} is called {pn}."]),
-        (f"user lives in bandung", ["where do i live?", "what city am i in?"],
-         ["You live in bandung."]),
+        (f"user lives in {city}", ["where do i live?", "what city am i in?"],
+         [f"You live in {city}."]),
         (f"user has 2 siblings", ["how many siblings do i have?", "do i have brothers or sisters?"],
          ["You have 2 siblings."]),
         (f"user's birthday is in march", ["when is my birthday?", "do you remember my birthday?"],
@@ -109,14 +113,27 @@ def E_decide():
          ["You picked team blue."]),
     ]
 
+_REPL = [("user's", "my"), ("user has a math test", "i have a math test"),
+         ("user has", "i have"), ("user is", "i am"), ("user works", "i work"),
+         ("user studies", "i study"), ("user lives", "i live"),
+         ("user wants", "i want"), ("user won", "i won"),
+         ("user prefers", "i prefer"), ("user chose", "i chose"),
+         ("user decided", "i decided"), ("user asked", "i asked"),
+         ("user drinks", "i drink"), ("user ", "i ")]
+
+def to_user(text):
+    """'user has a dog called mochi' -> 'i have a dog called mochi' (proper 1st person)."""
+    for a, b in _REPL:
+        text = text.replace(a, b)
+    return text
+
 def part1_session(events):
     """Build conversation where events surface naturally + AI writes <mem> markers."""
     intros = ["oh also","btw","hey so","fyi","just so you know","quick thing","listen","noted this yet?"]
     turns = []
     for ev_text, qs, ans in events:
-        u = R.choice(intros) + ", " + ev_text.replace("user's", "my").replace("user ", "i ", 1) \
-            if R.random() < 0.7 else ev_text.replace("user's", "my").replace("user ", "i ", 1)
-        u = u.replace("user has a math test", "i have a math test").replace("ai was listing", "keep giving me") \
+        u = R.choice(intros) + ", " + to_user(ev_text) if R.random() < 0.7 else to_user(ev_text)
+        u = u.replace("ai was listing", "keep giving me") \
              .replace("ai was suggesting", "more").replace("ai suggested", "more")
         style = R.choice([
             lambda a: a,

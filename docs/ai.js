@@ -21,30 +21,59 @@ function rawTokens(text){
 
 class Tok {
   constructor(itos){ this.itos = itos; this.stoi = {}; itos.forEach((w,i)=>this.stoi[w]=i); }
-  static async load(){ const itos = await (await fetch("models/vocab2.json")).json(); return new Tok(itos); }
-  encode(text){ const u = this.stoi["<unk>"]; return rawTokens(text).map(w => this.stoi[w] ?? u); }
+  static async load(){ const itos = await (await fetch("models/vocab3.json")).json(); return new Tok(itos); }
+  /* one raw token -> ids. OOV ascii words are spelled letter-by-letter so the
+   * model can READ and COPY arbitrary user text (names, tags, anything). */
+  wordIds(w){
+    const i = this.stoi[w];
+    if (i != null) return [i];
+    const u = this.stoi["<unk>"];
+    if (/^[a-z0-9]+$/.test(w) && w.length > 1 && w.length <= 24){
+      const out = [];
+      for (const c of w){ const ci = this.stoi[c]; if (ci == null) return [u]; out.push(ci); }
+      return out;
+    }
+    return [u];
+  }
+  encode(text){ const out = []; for (const w of rawTokens(text)) out.push(...this.wordIds(w)); return out; }
   /* decode generated ids -> {text, mems, think}
    * - <mem>..</mem>     -> collected into mems (hidden from text)
-   * - <think>..</think> -> collected into think (rendered in the thinking panel) */
+   * - <think>..</think> -> collected into think (rendered in the thinking panel)
+   * - consecutive single letter/digit tokens merge back into words (agusi)
+   *   and contraction tails glue after an apostrophe (i'd, i'm, we'll) */
   decode(ids){
     const drop = new Set(["<pad>","<bos>","<user>","<ai>","<memory>","</memory>","<eos>","<unk>","<nl>"]);
-    const glue = new Set([".",",","!","?",":",";","'","%","'s",")","}"]);
+    const hardGlue = new Set([".",",","!","?",":",";",")","}","%","'s"]);
     let out = "", inMem = false, inThink = false;
     const mems = []; let curMem = "", think = "", curThink = "";
-    const push = (dst, w) => dst + (dst && !dst.endsWith(" ") ? " " : "") + w;
+    const isSingle = (w) => w.length === 1 && /[a-z0-9]/.test(w);
+    const emit = (dst, w) => {
+      // returns [newDst, prevSingle, tight]
+      if (w === "'" || w === "(" || w === "{") return [dst + w, false, w === "'"];
+      if (hardGlue.has(w)) return [dst + w, false, false];
+      const single = isSingle(w);
+      if (single && (this._prevSingle || this._tight)) return [dst + w, !!this._prevSingle, false];
+      if (this._tight && w.length <= 3 && /[a-z0-9]+/.test(w)) return [dst + w, false, false];
+      const sep = dst && !dst.endsWith("\n") && !dst.endsWith("(") && !dst.endsWith("{") ? " " : "";
+      return [dst + sep + w, single, false];
+    };
+    this._prevSingle = false; this._tight = false;
     for (const i of ids){
       const w = this.itos[i]; if (w == null) continue;
-      if (w === "<mem>"){ inMem = true; curMem = ""; continue; }
-      if (w === "</mem>"){ inMem = false; if (curMem.trim()) mems.push(curMem.trim()); continue; }
-      if (w === "<think>"){ inThink = true; curThink = ""; continue; }
-      if (w === "</think>"){ inThink = false; if (curThink.trim()) think = curThink.trim(); continue; }
-      if (inThink){ if (!drop.has(w)) curThink = push(curThink, w); continue; }
-      if (inMem){ if (!drop.has(w)) curMem = push(curMem, w); continue; }
-      if (w === "<nl>"){ out += "\n"; continue; }
+      if (w === "<mem>"){ inMem = true; curMem = ""; this._prevSingle=false; this._tight=false; continue; }
+      if (w === "</mem>"){ inMem = false; if (curMem.trim()) mems.push(curMem.trim()); this._prevSingle=false; this._tight=false; continue; }
+      if (w === "<think>"){ inThink = true; curThink = ""; this._prevSingle=false; this._tight=false; continue; }
+      if (w === "</think>"){ inThink = false; if (curThink.trim()) think = curThink.trim(); this._prevSingle=false; this._tight=false; continue; }
+      if (w === "<nl>"){
+        this._prevSingle=false; this._tight=false;
+        if (inThink) curThink += "\n"; else if (!inMem) out += "\n";
+        continue;
+      }
+      if (inThink){ if (!drop.has(w) && !SPECIALS.includes(w)){ [curThink, this._prevSingle, this._tight] = emit(curThink, w); } continue; }
+      if (inMem){ if (!drop.has(w)){ [curMem, this._prevSingle, this._tight] = emit(curMem, w); } continue; }
       if (drop.has(w)) continue;
       if (SPECIALS.includes(w)) continue;
-      if (glue.has(w)) out += w;
-      else out += (out && !out.endsWith("\n") && !out.endsWith(" ") ? " " : "") + w;
+      [out, this._prevSingle, this._tight] = emit(out, w);
     }
     if (inThink && curThink.trim()) think = curThink.trim();   // stream-open think
     if (inMem && curMem.trim()) mems.push(curMem.trim());
@@ -55,7 +84,7 @@ class Tok {
 /* ---------------- model session ---------------- */
 const MDIMS = {   // [n_layers, n_heads, d_model, vocab_rows] per checkpoint
   "2m": [5, 5, 170, 1446], "5m": [6, 8, 256, 1446], "10m": [6, 8, 368, 1446],
-  "17m": [8, 8, 416, 1446], "20m": [8, 8, 448, 1538], "22m": [8, 8, 472, 1540],
+  "17m": [8, 8, 416, 1446], "20m": [8, 8, 448, 1538], "22m": [8, 8, 472, 1588],
 };
 
 class Sigma {

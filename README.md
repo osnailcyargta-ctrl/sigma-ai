@@ -10,7 +10,7 @@ was trained from zero on a corpus generated from zero, on a 2-core CPU.
 | `10m` | 10,388,272 | trained — eval ppl 1.47, game-intent acc ~100% |
 | `17m` | 17,337,632 | trained — eval ppl 1.48, game-intent acc ~100% |
 | `20m` | 20,088,768 | trained — think traces + interrupt discipline, intent acc 100% |
-| `22m` | 22,253,384 | flagship — think traces, interrupt discipline, extended schedule |
+| `22m` | 22,276,040 | **flagship** — char-copy memory (open-vocabulary), think traces, interrupt discipline, eval ppl 1.19, intent acc 100% |
 
 (2M and 5M checkpoints were retired from the repo at the 20M milestone.)
 
@@ -36,9 +36,18 @@ was trained from zero on a corpus generated from zero, on a 2-core CPU.
   two preset personalities (fake-smile yes-man, blunt sigma) and ~2,600 compositional
   custom personas (character × tone × quirk).
 - **Tokenizer**: word-level, built from the corpus itself (`src/tokenizer.py`,
-  ported 1:1 to JS in `docs/ai.js`). `vocab2.json` keeps the original 1,446 ids
-  stable and appends `<think>`/`</think>` plus new words — old checkpoints stay
-  bit-compatible.
+  ported 1:1 to JS in `docs/ai.js`). `vocab3.json` keeps every original id stable,
+  appends `<think>`/`</think>` and — the v4 upgrade — **every missing single letter**.
+  Any out-of-vocab word (a name, a gamertag, a city, a pet, anything you type) is
+  now spelled letter-by-letter, so the model can literally READ and COPY arbitrary
+  user text. No more canned-name hallucinations: say "my name is agusi" and it
+  echoes, stores, and recalls **agusi** — not the most frequent name in its
+  training pool. Old checkpoints stay compatible (they clamp the new ids).
+- **Char-copy memory**: the 22m flagship is trained on 244 diverse names and
+  open-vocabulary facts (pets, cities, bands, gamertags) where the assistant must
+  copy the char-spelled value from context — echo, `<mem>` write, and recall are
+  all exact copies. Verified on unseen names: agusi, riley, zerofrost — all
+  perfect echo + recall.
 - **Heads**: LM head + a game-intent classifier head (5 classes) sharing the trunk —
   the AI *learns* whether "tic tac toe is for kids" is different from
   "how about a quick tic tac toe duel". No keyword matching anywhere.

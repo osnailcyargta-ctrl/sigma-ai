@@ -18,7 +18,10 @@ def load(stage):
     m = Transformer(cfg)
     m.load_state_dict(ck["model"])
     m.eval()
-    tk = Tokenizer.load(os.path.join(DATA, "vocab2.json"))
+    vp = os.path.join(DATA, "vocab3.json")
+    if not os.path.exists(vp):
+        vp = os.path.join(DATA, "vocab2.json")
+    tk = Tokenizer.load(vp)
     return m, tk, ck["params"]
 
 @torch.no_grad()
@@ -144,12 +147,30 @@ def main():
     a4, th4, _ = chat(model, tk, "sigma", hist, "continue")
     print(f"  [U] continue\n  [THINK] {th4}\n  [AI] {a4}   <-- must RESUME the story, not the math\n")
 
-    print("-- 5) name memory test")
+    print("-- 5) name memory test (in-vocab name)")
     h = []
     a, _, mm = chat(model, tk, "fake", h, "my name is dino")
     print(f"  [U] my name is dino\n  [AI] {a}\n  [MEM-WRITE] {mm}\n")
     h.append(("my name is dino", a))
     show(model, tk, "name", "fake", h, "what's my name?")
+
+    print("-- 5b) NAME COPY test (OOV names, char-spelled — MUST read from context)")
+    for nm in ["agusi", "riley", "zerofrost"]:
+        hh = []
+        a, _, mm = chat(model, tk, "fake", hh, f"my name is {nm}")
+        ok = "OK" if nm in a.lower() else "*** FAIL: name not echoed ***"
+        print(f"  [U] my name is {nm}\n  [AI] {a}   <-- {ok}\n  [MEM-WRITE] {mm}\n")
+        hh.append((f"my name is {nm}", a))
+        a2, _, _ = chat(model, tk, "fake", hh, "what's my name?")
+        ok2 = "OK" if nm in a2.lower() else "*** FAIL: recall wrong ***"
+        print(f"  [U] what's my name?\n  [AI] {a2}   <-- {ok2}\n")
+
+    print("-- 5c) arbitrary fact copy test (open-vocabulary memory)")
+    hh = []
+    a, _, mm = chat(model, tk, "sigma", hh, "my dog is called kombu")
+    print(f"  [U] my dog is called kombu\n  [AI] {a}\n  [MEM-WRITE] {mm}\n")
+    hh.append(("my dog is called kombu", a))
+    show(model, tk, "copy", "sigma", hh, "what's my dog's name?")
 
     print("-- 6) sigma honest judgment")
     show(model, tk, "judge", "sigma", [], "i think i should text my ex at 3am")

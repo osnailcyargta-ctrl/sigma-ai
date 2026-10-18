@@ -43,8 +43,8 @@ def pad_intent(samples, pad=0):
     return torch.from_numpy(x), torch.from_numpy(lab)
 
 def train_stage(name, lm, lmev, it, max_steps, max_minutes, lr, model_path):
-    import json
-    with open(os.path.join(DATA, "vocab2.json"), "r", encoding="utf-8") as f:
+    import json, string
+    with open(os.path.join(DATA, "vocab3.json"), "r", encoding="utf-8") as f:
         vocab_size = len(json.load(f))
     cfg = configs(vocab=vocab_size)[name]
     model = Transformer(cfg)
@@ -53,7 +53,25 @@ def train_stage(name, lm, lmev, it, max_steps, max_minutes, lr, model_path):
     start_step, history = 0, []
     if os.path.exists(model_path):
         ck = torch.load(model_path, map_location="cpu", weights_only=False)
-        model.load_state_dict(ck["model"])
+        sd = ck["model"]
+        # vocab growth/shrink between regens: keep the checkpoint table aligned
+        # to the data vocab. Growth appends fresh rows (new letter tokens etc.);
+        # shrink truncates tail rows (rare words that dropped out of the cut —
+        # the tokenizer already falls back to char-spelling for them).
+        old_v = sd["tok_emb.weight"].shape[0]
+        if old_v != cfg.vocab_size:
+            w = sd["tok_emb.weight"]
+            if old_v < cfg.vocab_size:
+                g = torch.Generator().manual_seed(77)
+                new = torch.empty(cfg.vocab_size, w.shape[1])
+                torch.nn.init.normal_(new, mean=0.0, std=0.02, generator=g)
+                new[:old_v] = w
+            else:
+                new = w[:cfg.vocab_size].clone()
+            sd["tok_emb.weight"] = new
+            sd["lm_head.weight"] = new
+            print(f"resized embedding: {old_v} -> {cfg.vocab_size} rows")
+        model.load_state_dict(sd)
         start_step = ck.get("step", 0)
         history = ck.get("history", [])
         print(f"resumed from step {start_step}")

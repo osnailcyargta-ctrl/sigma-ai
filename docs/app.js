@@ -125,7 +125,7 @@
       localStorage.setItem("sigma.size", size);
       chipModel.textContent = size.toUpperCase();
       const P = {"10m":"10,388,272 params · ppl 1.47","17m":"17,337,632 params · ppl 1.48",
-                 "20m":"20,088,768 params · think + interrupts","22m":"22,253,384 params · flagship"};
+                 "20m":"20,088,768 params · think + interrupts","22m":"22,276,040 params · char-copy memory · flagship"};
       $("#modelInfo").textContent = P[size] || "";
       loadState.textContent = `${size} ready`;
       setBtn("idle");
@@ -191,11 +191,14 @@
         ? `recalled ${memRows.length} memor${memRows.length>1?"ies":"y"}: ${memRows.map(r=>r.text).join(" | ")}`
         : "no long-term memory matches this");
 
-      /* 3) generate — thinking streams into the panel, answer streams into the bubble */
+      /* 3) generate — thinking streams into the panel, answer streams into the bubble.
+       * Math-shaped turns decode near-greedy: the model memorized exact sums,
+       * sampling noise would only corrupt recall (still the model doing the math). */
+      const isMath = /\b\d+\s*[+x\-]\s*\d+/.test(text) || /^count to \d+/.test(text.trim());
       const promptIds = clampPrompt(await buildPrompt(text, memRows), state.model);
       let answer = "", stopped = false, tokCount = 0;
       const gen = await state.model.generate(promptIds, {
-        maxThink: 42, maxNew: 72, temp: 0.65, topK: 20, topP: 0.9,
+        maxThink: 42, maxNew: 72, temp: isMath ? 0.12 : 0.65, topK: isMath ? 4 : 20, topP: 0.9,
         shouldAbort: () => state.abort,
         onThink: (txt, done) => {
           if (state.model.hasThink) ui.thinkBody.textContent = txt;
