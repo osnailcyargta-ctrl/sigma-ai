@@ -36,6 +36,8 @@ def configs(vocab=1446, block=256):
         "5m":  Config(vocab, 256, 6, 8, block),
         "10m": Config(vocab, 368, 6, 8, block),
         "17m": Config(vocab, 416, 8, 8, block),
+        "20m": Config(vocab, 448, 8, 8, block),
+        "22m": Config(vocab, 472, 8, 8, block),
     }
 
 class CausalSelfAttention(nn.Module):
@@ -49,17 +51,27 @@ class CausalSelfAttention(nn.Module):
         self.register_buffer("mask", mask.view(1, 1, cfg.block_size, cfg.block_size),
                              persistent=False)
 
-    def forward(self, x):
+    def forward(self, x, past_k=None, past_v=None):
         B, T, C = x.shape
         q, k, v = self.qkv(x).split(C, dim=2)
         q = q.view(B, T, self.n_heads, C // self.n_heads).transpose(1, 2)
         k = k.view(B, T, self.n_heads, C // self.n_heads).transpose(1, 2)
         v = v.view(B, T, self.n_heads, C // self.n_heads).transpose(1, 2)
+        if past_k is not None:
+            k = torch.cat([past_k, k], dim=2)
+            v = torch.cat([past_v, v], dim=2)
         att = (q @ k.transpose(-2, -1)) / math.sqrt(k.size(-1))
-        att = att.masked_fill(~self.mask[:, :, :T, :T], float("-inf"))
+        if past_k is not None:
+            # dynamic causal mask: query i (abs pos past+i) may see keys 0..past+i
+            S = k.size(2)
+            dyn = torch.tril(torch.ones(T, S, dtype=torch.bool, device=x.device),
+                             diagonal=S - T)
+            att = att.masked_fill(~dyn, float("-inf"))
+        else:
+            att = att.masked_fill(~self.mask[:, :, :T, :T], float("-inf"))
         y = F.softmax(att, dim=-1) @ v
         y = y.transpose(1, 2).reshape(B, T, C)
-        return self.proj(y)
+        return self.proj(y), k, v
 
 class Block(nn.Module):
     def __init__(self, cfg):
@@ -73,10 +85,11 @@ class Block(nn.Module):
             nn.Linear(4 * cfg.d_model, cfg.d_model, bias=False),
         )
 
-    def forward(self, x):
-        x = x + self.attn(self.ln1(x))
+    def forward(self, x, past_k=None, past_v=None):
+        a, pk, pv = self.attn(self.ln1(x), past_k, past_v)
+        x = x + a
         x = x + self.mlp(self.ln2(x))
-        return x
+        return x, pk, pv
 
 class Transformer(nn.Module):
     def __init__(self, cfg):
@@ -104,7 +117,7 @@ class Transformer(nn.Module):
         x = self.tok_emb(idx) + self.pos_emb(pos)[None, :, :]
         x = self.drop(x)
         for blk in self.blocks:
-            x = blk(x)
+            x, _, _ = blk(x)
         x = self.ln_f(x)
         logits = self.lm_head(x)
 
@@ -162,3 +175,27 @@ class Transformer(nn.Module):
 
     def stoi_nl(self):
         return 6  # "<nl>" index in SPECIALS
+
+    @torch.no_grad()
+    def forward_cached(self, idx, past_k=None, past_v=None):
+        """Cache-aware forward for ONNX export / incremental decode.
+        past_k/past_v: [L, 1, H, T_past, head_dim] or None (prefill).
+        Returns dict with logits (last position), pooled, intent_logits,
+        and present_k/present_v in the same [L,1,H,T,Dh] layout."""
+        B, T = idx.shape
+        past_len = 0 if past_k is None else past_k.shape[3]
+        pos = torch.arange(past_len, past_len + T, device=idx.device)
+        x = self.tok_emb(idx) + self.pos_emb(pos)[None, :, :]
+        pk_list, pv_list = [], []
+        for i, blk in enumerate(self.blocks):
+            pki = None if past_k is None else past_k[i]
+            pvi = None if past_v is None else past_v[i]
+            x, pk, pv = blk(x, pki, pvi)
+            pk_list.append(pk)
+            pv_list.append(pv)
+        x = self.ln_f(x)
+        logits = self.lm_head(x)
+        pooled = x.mean(dim=1)
+        intent_logits = self.intent_head(pooled)
+        return {"logits": logits, "pooled": pooled, "intent_logits": intent_logits,
+                "present_k": torch.stack(pk_list), "present_v": torch.stack(pv_list)}

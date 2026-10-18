@@ -1,9 +1,9 @@
 /* SIGMA Service Worker: app shell + MODEL WEIGHTS are cached.
  * After first load the AI never re-downloads its brain — full offline. */
-const SHELL = "sigma-shell-v1";
-const MODELS = "sigma-models-v1";
+const SHELL = "sigma-shell-v3";
+const MODELS = "sigma-models-v3";   // v3: KV-cache graphs + vocab2 (think tokens)
 const SHELL_ASSETS = ["./", "index.html", "style.css", "app.js", "ai.js", "games.js",
-  "manifest.json", "ort.min.js", "ort-wasm-simd-threaded.wasm",
+  "manifest.json", "ort.min.js", "ort-wasm-simd-threaded.wasm", "ort-wasm-simd-threaded.mjs",
   "icons/icon-192.png", "icons/icon-512.png"];
 
 self.addEventListener("install", (e) => {
