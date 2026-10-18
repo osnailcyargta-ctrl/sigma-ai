@@ -21,18 +21,23 @@ class Tok {
   static async load(){ const itos = await (await fetch("models/vocab.json")).json(); return new Tok(itos); }
   encode(text){ const u = this.stoi["<unk>"]; return rawTokens(text).map(w => this.stoi[w] ?? u); }
   decode(ids){
-    const drop = new Set(["<pad>","<bos>","<user>","<ai>","<mem>","</mem>","<memory>","</memory>","<eos>","<unk>","<nl>"]);
+    const drop = new Set(["<pad>","<bos>","<user>","<ai>","<memory>","</memory>","<eos>","<unk>","<nl>"]);
     const glue = new Set([".",",","!","?",":",";","'","%","'s",")","}"]);
-    let out = "";
+    let out = "", inMem = false;
+    const mems = [];
+    let curMem = "";
     for (const i of ids){
       const w = this.itos[i]; if (w == null) continue;
+      if (w === "<mem>"){ inMem = true; curMem = ""; continue; }
+      if (w === "</mem>"){ inMem = false; if (curMem.trim()) mems.push(curMem.trim()); continue; }
+      if (inMem){ if (!drop.has(w)) curMem += (curMem && !curMem.endsWith(" ") ? " " : "") + w; continue; }
       if (w === "<nl>"){ out += "\n"; continue; }
       if (drop.has(w)) continue;
       if (SPECIALS.includes(w)) continue;
       if (glue.has(w)) out += w;
       else out += (out && !out.endsWith("\n") && !out.endsWith(" ") ? " " : "") + w;
     }
-    return out.trim();
+    return { text: out.trim(), mems };
   }
 }
 
@@ -88,10 +93,11 @@ class Sigma {
       for (const v of kept2){ r -= probs[v]; if (r <= 0){ pick = v; break; } }
       const t = Math.round(temp) === 0 ? kept2[0] : pick; // temp<=0 -> greedy
       ids.push(t); out.push(t);
-      if (onToken) onToken(this.tk.decode(out));
+      if (onToken) onToken(this.tk.decode(out).text);
       if (stop.has(t)) break;
     }
-    return this.tk.decode(out).replace(/<mem>[\s\S]*?<\/mem>/g, "").trim();
+    const res = this.tk.decode(out);
+    return { text: res.text, mems: res.mems };
   }
 
   async intent(userText, persona="sigma"){

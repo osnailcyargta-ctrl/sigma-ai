@@ -130,14 +130,15 @@ class Transformer(nn.Module):
 
     @torch.no_grad()
     def generate(self, idx, max_new=48, temperature=0.75, top_k=25, top_p=0.9,
-                 stop_tokens=None, allow_nl=True):
+                 stop_tokens=None, allow_nl=True, ban_tokens=(0, 1)):
+        """ban_tokens: <pad>/<unk> can never be sampled. Stop tokens ARE sampleable;
+        sampling one ends the turn (this is how the model says 'my turn is over')."""
         self.eval()
         stop = set(stop_tokens or [])
         for _ in range(max_new):
             idx_cond = idx[:, -self.cfg.block_size:]
             logits = self(idx_cond)["logits"][:, -1, :]
-            logits[:, 3] = -1e9 if len(stop) else logits[:, 3]  # <eos> only if stopping
-            for t in stop:
+            for t in ban_tokens:
                 logits[:, t] = -1e9
             if not allow_nl:
                 logits[:, self.stoi_nl()] = -1e9
