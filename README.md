@@ -9,7 +9,7 @@ was trained from zero on a corpus generated from zero, on a 2-core CPU.
 |-----------|--------|--------|
 | `2m`  | 2,027,930  | trained — eval ppl 1.76, game-intent acc ~100% |
 | `5m`  | 5,162,240  | trained — eval ppl 1.55, game-intent acc ~100% |
-| `10m` | ~10M | queued |
+| `10m` | 10,388,272 | trained — eval ppl 1.47, game-intent acc ~100% |
 | `17m` | ~17M | queued |
 
 - **Architecture**: decoder-only transformer (GPT-style) — learned token + positional
