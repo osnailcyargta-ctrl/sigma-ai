@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>SIGMA — AI built from scratch</title>
+<meta name="description" content="A real transformer, trained from zero. Real memory, real personality, real games.">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="theme-color" content="#18181b">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <div class="brand">
+      <div class="brand-dot"></div>
+      <div>
+        <div class="brand-name">SIGMA</div>
+        <div class="brand-sub">transformer · trained from zero</div>
+      </div>
+    </div>
+    <button id="btnNew" class="btn-new">＋ New chat</button>
+
+    <div class="side-section">
+      <div class="side-label">Model checkpoint</div>
+      <div class="seg" id="modelSeg">
+        <button data-m="2m">2M</button>
+        <button data-m="5m">5M</button>
+        <button data-m="10m">10M</button>
+        <button data-m="17m" class="active">17M</button>
+      </div>
+      <div id="modelInfo" class="model-info">—</div>
+    </div>
+
+    <div class="side-section">
+      <div class="side-label">Personality</div>
+      <div class="pers-list" id="persList">
+        <button data-p="fake" class="pers-item"><b>Fake Smile</b><span>agreeable, hype, always on your side</span></button>
+        <button data-p="sigma" class="pers-item active"><b>Sigma</b><span>judges your ideas honestly, no fake yes</span></button>
+        <button data-p="custom" class="pers-item"><b>Custom</b><span>write your own persona prompt</span></button>
+      </div>
+      <textarea id="customPrompt" class="custom-prompt" rows="3" placeholder='e.g. "you are a grumpy pirate who secretly loves poetry"'></textarea>
+    </div>
+
+    <div class="side-section">
+      <div class="side-label">Long-term memory <span id="memCount" class="pill">0</span></div>
+      <div id="memList" class="mem-list"><div class="mem-empty">memory is empty — tell it something about you</div></div>
+      <button id="btnClearMem" class="btn-ghost">Clear memory</button>
+    </div>
+
+    <div class="side-footer">
+      <div class="foot-line">built 100% from scratch</div>
+      <div class="foot-line dim">data · tokenizer · transformer · weights</div>
+      <button id="btnInstall" class="btn-ghost" style="display:none">⤓ Install app (PWA)</button>
+    </div>
+  </aside>
+
+  <main id="main">
+    <header id="topbar">
+      <button id="btnMenu" class="icon-btn" aria-label="menu">☰</button>
+      <div class="chip" id="chipModel">17M</div>
+      <div class="chip" id="chipPers">sigma</div>
+      <div class="chip chip-ok" id="chipMem">memory on</div>
+      <div class="spacer"></div>
+      <div id="loadState" class="load-state">idle</div>
+    </header>
+
+    <div id="chat"></div>
+
+    <div id="gameDock"></div>
+
+    <footer id="composer">
+      <textarea id="input" rows="1" placeholder="Message SIGMA — or invite it to a game..."></textarea>
+      <button id="btnSend" aria-label="send">➤</button>
+    </footer>
+  </main>
+</div>
+<script src="ort.min.js"></script>
+<script src="ai.js"></script>
+<script src="games.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
