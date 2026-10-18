@@ -43,7 +43,10 @@ def pad_intent(samples, pad=0):
     return torch.from_numpy(x), torch.from_numpy(lab)
 
 def train_stage(name, lm, lmev, it, max_steps, max_minutes, lr, model_path):
-    cfg = configs()[name]
+    import json
+    with open(os.path.join(DATA, "vocab2.json"), "r", encoding="utf-8") as f:
+        vocab_size = len(json.load(f))
+    cfg = configs(vocab=vocab_size)[name]
     model = Transformer(cfg)
     n_par = sum(p.numel() for p in model.parameters())
     opt = torch.optim.AdamW(model.parameters(), lr=lr, betas=(0.9, 0.95), weight_decay=0.1)
@@ -64,13 +67,17 @@ def train_stage(name, lm, lmev, it, max_steps, max_minutes, lr, model_path):
         print("ALREADY_DONE")
         return n_par
     last_step = start_step
+    # length-bucketed batches: random windows over a length-sorted index
+    # (near-uniform batch lengths -> ~2x less padding compute on CPU)
+    order = sorted(range(len(lm)), key=lambda i: len(lm[i][0]))
     for step in range(start_step, max_steps):
         if (time.time()-t0)/60 > max_minutes:
             print("CHUNK_TIME_REACHED"); break
         for g in opt.param_groups: g["lr"] = lr_at(step)
         # batch: ~7/8 LM, ~1/8 intent
         bs_lm, bs_it = 20, 8
-        lmb = rng.sample(lm, bs_lm)
+        s0 = rng.randrange(max(1, len(order) - bs_lm))
+        lmb = [lm[i] for i in order[s0:s0+bs_lm]]
         itb = rng.sample(it, bs_it)
         x, y, m = pad_batch(lmb)
         xi, li = pad_intent(itb)

@@ -1,9 +1,15 @@
 """Main data pipeline: generates ALL training data from scratch, builds the
-tokenizer vocab, serializes samples with loss masks, saves pickles + vocab."""
+tokenizer vocab, serializes samples with loss masks, saves pickles + vocab.
+
+v2: every assistant turn now carries a <think>...</think> private plan
+(gen_think.think_for) and the dataset includes story/list INTERRUPT families
+(fam_interrupt) so a paused task never swallows unrelated messages.
+vocab2 = old vocab ids (stable for existing checkpoints) + <think>/</think>
+appended at the end."""
 import os, sys, pickle, json, random
 sys.path.insert(0, os.path.dirname(__file__))
 import tokenizer as tokmod
-import gen_chat, gen_memory, personas_gen
+import gen_chat, gen_memory, personas_gen, gen_think
 
 R = random.Random(99)
 DATA = os.path.join(os.path.dirname(__file__), "..", "data")
@@ -25,7 +31,7 @@ INTENT_RPS = ["rock paper scissors","let's do rock paper scissors","rps?","throw
 INTENT_DICE = ["roll the dice","dice battle","throw some dice","roll 3 dice","dice?","let's gamble on dice",
     "roll two dice with me","dice game time","roll them bones","dice me","let's do a dice roll off","highest roll wins, dice",
     "throw 3 dice at once","two dice, go","dice showdown","i call dice","roll dice with me bro","dice round, now",
-    "switch to three dice and roll","give me the dice game"]
+    "switch to three dice and roll","give me the dice game","can we play dice?"]
 INTENT_ASK = ["got any games?","what games do you have","play something with me","wanna play a game",
     "i'm bored, entertain me","any mini games?","let's play","entertain me","play with me",
     "got games on this thing","bored... something fun?","occupy me with a game","give me a game","we should play something",
@@ -63,8 +69,33 @@ def gen_intent(n_each=(3200, 3200, 3200, 3800), n_none=15000):
     R.shuffle(labeled)
     return labeled
 
+ACK_MARKS = ("stopped", "paused", "halted", "on hold", "your move", "say continue", "the tale waits")
+
+def add_thinks(sample, kind):
+    """Attach a think trace to every turn, conditioned on real turn content.
+    Tracks the most recent SUBSTANTIVE task text (list/story) so 'continue'
+    thoughts anchor to the real resume point instead of the stop ack."""
+    persona = sample.get("persona") or "sigma"
+    last_answer = ""
+    task_text, task_type = "", ""
+    thinks = []
+    for u, a in sample["turns"]:
+        thinks.append(gen_think.think_for(u, a, {
+            "persona": persona, "last_answer": last_answer,
+            "task_text": task_text, "task_type": task_type}))
+        last_answer = a
+        low = a.lower()
+        if any(k in low for k in ACK_MARKS):
+            continue                      # acks don't change the pending task
+        if "," in a and ":" in a:
+            task_text, task_type = a, "list"
+        elif len(a) > 80:
+            task_text, task_type = a, "story"
+    sample["thinks"] = thinks
+    return sample
+
 def serialize(sample, stoi):
-    """Returns (ids, mask) or None if OOV-heavy."""
+    """Returns (ids, mask). Assistant turns: <think>plan</think> answer <mem>...</mem>?"""
     ids, mask = [stoi["<bos>"]], [0]
     def emit(text, m):
         for w in tokmod.tokenize_text(text):
@@ -77,38 +108,71 @@ def serialize(sample, stoi):
         emit("<nl>", 0)
     if sample.get("block"):
         emit(sample["block"], 0)
-    for u, a in sample["turns"]:
+    thinks = sample.get("thinks") or [None] * len(sample["turns"])
+    for (u, a), th in zip(sample["turns"], thinks):
         emit("<user>", 1)
         emit(u, 0)
         emit("<ai>", 1)
+        if th:
+            emit("<think>", 1)
+            emit(th, 1)
+            emit("</think>", 1)
         emit(a, 1)
     emit("<eos>", 1)
+    if len(ids) > 256:            # hard context limit (positional emb): drop overflow
+        return None
     return ids, mask
 
 def main():
     os.makedirs(DATA, exist_ok=True)
-    print("[1/5] generating conversations...")
+    print("[1/6] generating conversations...")
     core = gen_chat.generate_core(82000)
     flows = gen_chat.generate_gameflows(9000)
     pers = personas_gen.generate_personas(2600)
     mem_sessions = gen_memory.generate_sessions(DOG_POOL, 26000)
 
-    texts = []
-    for s in core + flows:
-        texts.append(f"<pers:{s['persona']}>" + "<user>".join(f"{u}<ai>{a}" for u, a in s["turns"]))
-    for s in pers:
-        texts.append(f"<pers:custom>{s['desc']}<nl>" + "<user>".join(f"{u}<ai>{a}" for u, a in s["turns"]))
-    for s in mem_sessions:
-        head = f"<pers:sigma>{s['block'] if s['block'] else ''}"
-        texts.append(head + "<user>".join(f"{u}<ai>{a}" for u, a in s["turns"]))
+    print("[2/6] attaching think traces...")
+    unk_watch = 0, 0
+    for s in core: add_thinks(s, "core")
+    for s in flows: add_thinks(s, "flow")
+    for s in pers: add_thinks(s, "persona")
+    for s in mem_sessions: add_thinks(s, s.get("kind", "mem"))
 
-    print("[2/5] building tokenizer...")
-    tk = tokmod.Tokenizer.build(texts, vocab_size=6000)
-    tk.save(os.path.join(DATA, "vocab.json"))
-    print("  vocab size:", len(tk))
+    print("[3/6] building vocab2 (old ids stable, new tokens appended)...")
+    with open(os.path.join(DATA, "vocab.json"), "r", encoding="utf-8") as f:
+        base = json.load(f)
+    old_len = len(base)
+    if "<think>" not in base:
+        base = base + ["<think>", "</think>"]
+    tk = tokmod.Tokenizer(base)
+
+    # extend with new words from think traces + new families (ids >= old_len+2,
+    # so existing checkpoints are untouched: they never see these ids)
+    from collections import Counter
+    cnt = Counter()
+    for s in core + flows + pers + mem_sessions:
+        for th in s["thinks"]:
+            cnt.update(tokmod.tokenize_text(th))
+        for u, a in s["turns"]:
+            cnt.update(tokmod.tokenize_text(u))
+            cnt.update(tokmod.tokenize_text(a))
+    additions = [w for w, c in cnt.most_common(1200)
+                 if c >= 3 and w not in tk.stoi][:400]
+    tk = tokmod.Tokenizer(base + additions)
+    tk.save(os.path.join(DATA, "vocab2.json"))
     stoi = tk.stoi
+    print(f"  vocab2 size: {len(tk)} (old: {old_len}, +<think>/</think> +{len(additions)} new words)")
 
-    print("[3/5] serializing LM samples with masks...")
+    # OOV check on think text (want < 2%)
+    tot, oov = 0, 0
+    for s in core + flows + pers + mem_sessions:
+        for th in s["thinks"]:
+            for w in tokmod.tokenize_text(th):
+                tot += 1
+                if w not in stoi: oov += 1
+    print(f"  think-token OOV rate: {oov}/{tot} = {oov/max(tot,1):.2%}")
+
+    print("[4/6] serializing LM samples with masks...")
     samples = []
     for s in core + flows + pers + mem_sessions:
         r = serialize(s, stoi)
@@ -137,7 +201,7 @@ def main():
                  total_tokens=ntok, avg_len=round(ntok/len(tr), 1))
     with open(os.path.join(DATA, "stats.json"), "w") as f:
         json.dump(stats, f, indent=2)
-    print("[5/5] saved:", stats)
+    print("[6/6] saved:", stats)
 
 if __name__ == "__main__":
     main()

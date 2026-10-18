@@ -312,6 +312,79 @@ def fam_continue_negative(persona):
     a = R.choice(["Continue what exactly? Give me a task first.","Sure — continue what? Nothing's running yet.","Nothing in progress. Start me a task and I'll continue it."])
     return [(u, a)]
 
+# ---------------- interrupt: paused task + unrelated pivot + exact resume ----------------
+# THE anti-fly family: teaches that a paused story/list does NOT swallow every
+# later message. New question gets answered; 'continue' still resumes EXACTLY.
+
+def _pivot_math(persona):
+    a, b = R.randint(2, 30), R.randint(2, 30)
+    u = f"what's {a} + {b}?"
+    return (u, f"{a} + {b} = {a+b}.")
+
+def _pivot_name(persona):
+    n = R.choice(NAMES)
+    u = f"btw my name is {n}"
+    a = (f"{n.capitalize()}!! Saved forever!!<mem>user's name is {n}</mem>" if persona=="fake"
+         else f"{n.capitalize()}. Saved.<mem>user's name is {n}</mem>")
+    return (u, a)
+
+def _pivot_dice(persona):
+    u = R.choice(["can we play dice?","let's throw dice instead","dice first"])
+    a = ("Dice first, tale later!! Two dice per throw — highest total wins!!" if persona=="fake"
+         else "Dice first, tale on hold. Two dice per throw, highest total wins.")
+    return (u, a)
+
+def _pivot_greet(persona):
+    u = R.choice(["hi","hey","hello"])
+    a = ("Hey hey!! The story's still paused — say continue, or hit me with something new!!" if persona=="fake"
+         else "Hey. Still paused mid-task — say continue, or bring something new.")
+    return (u, a)
+
+def _pivot_opinion(persona):
+    a_, b_ = R.choice(OPINIONS)
+    u = f"quick one, {a_} or {b_}?"
+    a1 = (R.choice([f"{a_}!! Obviously!!", f"Team {a_}!!"]) if persona=="fake"
+          else f"{a_}. Clear margin.")
+    return (u, a1)
+
+def _pivot_fact(persona):
+    f = R.choice(FACTS)
+    u = "random fact while we wait"
+    a1 = f"Fact: {f.capitalize()}."
+    return (u, a1)
+
+PIVOTS = [_pivot_math, _pivot_math, _pivot_name, _pivot_dice, _pivot_greet, _pivot_opinion, _pivot_fact]
+
+def fam_interrupt(persona):
+    """list OR story is paused -> unrelated pivot (1-2) -> answer the pivot ->
+    optional 'continue' resumes the ORIGINAL task exactly."""
+    use_story = R.random() < 0.55
+    turns = []
+    if use_story:
+        s = story_sentences()
+        cut = R.randint(2, 4)
+        turns.append((R.choice(["tell me a short story","story time"]),
+                      " ".join(s[:cut])))
+        turns.append((R.choice(["stop","ok stop","wait stop"]),
+                      R.choice(["Paused mid-tale. Say continue.","Stopped there. The tale waits.","Story on hold."])))
+        resume = s[cut:cut+R.randint(2, 3)]
+    else:
+        t = R.choice(CONT_TASKS)
+        pool = t["pool"][:]; R.shuffle(pool)
+        k1 = R.randint(2, 3)
+        turns.append((R.choice(t["ask"]).replace("{n}", str(k1)), R.choice(t["intro"]) + ", ".join(pool[:k1]) + "."))
+        turns.append((R.choice(["stop","wait stop"]), R.choice(["Stopped. Say continue when ready.","Paused. Your move."])))
+        resume = pool[k1:k1+R.randint(2, 4)]
+    n_pivots = R.choice([1, 1, 2])
+    for _ in range(n_pivots):
+        turns.append(R.choice(PIVOTS)(persona))
+    if resume and R.random() < 0.85:
+        turns.append((R.choice(["continue","ok continue","go on","continue the story" if use_story else "continue the list"]),
+                      (R.choice(["Back to the tale: ", "Resuming exactly there: ", ""]) if use_story
+                       else R.choice(["Picking up where we stopped: ", "Resuming the list: ", ""]))
+                      + ("" if use_story and R.random() < 0.4 else ", ".join(resume) if not use_story else " ".join(resume))))
+    return turns
+
 FAMS = [fam_greeting, fam_identity, fam_name, fam_mood, fam_goodnews, fam_opinion,
         fam_useropinion, fam_advice, fam_math, fam_count, fam_joke, fam_fact,
         fam_thanks, fam_bye, fam_insult, fam_love, fam_weather, fam_help, fam_age]
@@ -322,12 +395,14 @@ def generate_core(n):
     for _ in range(n):
         persona = "fake" if R.random() < 0.5 else "sigma"
         r = R.random()
-        if r < 0.30:
+        if r < 0.26:
             turns = fam_continue(persona)
-        elif r < 0.38:
+        elif r < 0.33:
             turns = fam_continue_story(persona)
-        elif r < 0.41:
+        elif r < 0.36:
             turns = fam_continue_negative(persona)
+        elif r < 0.44:
+            turns = fam_interrupt(persona)      # anti-fly: pivot + exact resume
         else:
             turns = R.choices(FAMS, weights=WEIGHTS)[0](persona)
         out.append({"persona": persona, "desc": None, "turns": turns})

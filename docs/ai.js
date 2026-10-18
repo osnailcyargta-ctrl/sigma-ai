@@ -53,9 +53,9 @@ class Tok {
 }
 
 /* ---------------- model session ---------------- */
-const MDIMS = {   // [n_layers, n_heads, d_model] per checkpoint (for empty-cache prefill)
-  "2m": [5, 5, 170], "5m": [6, 8, 256], "10m": [6, 8, 368],
-  "17m": [8, 8, 416], "20m": [8, 8, 448], "22m": [8, 8, 472],
+const MDIMS = {   // [n_layers, n_heads, d_model, vocab_rows] per checkpoint
+  "2m": [5, 5, 170, 1446], "5m": [6, 8, 256, 1446], "10m": [6, 8, 368, 1446],
+  "17m": [8, 8, 416, 1446], "20m": [8, 8, 448, 1538], "22m": [8, 8, 472, 1540],
 };
 
 class Sigma {
@@ -63,9 +63,12 @@ class Sigma {
     this.sess = sess; this.tk = tk; this.size = size;
     this.cacheK = null; this.cacheV = null;      // ORT tensors [L,1,H,T,Dh]
     this.hasThink = tk.stoi["<think>"] != null;  // new checkpoints speak <think>
-    const md = MDIMS[size] || [8, 8, 416];
-    this.L = md[0]; this.H = md[1]; this.Dh = md[2] / md[1];
+    const md = MDIMS[size] || [8, 8, 416, 1446];
+    this.L = md[0]; this.H = md[1]; this.Dh = md[2] / md[1]; this.V = md[3];
   }
+
+  /* clamp ids to this checkpoint's embedding table (newer vocab words -> <unk>) */
+  clamp(ids){ const u = this.tk.stoi["<unk>"]; return ids.map(i => i < this.V ? i : u); }
 
   static async load(size, onProgress){
     const tk = await Tok.load();
@@ -140,6 +143,7 @@ class Sigma {
   async generate(promptIds, {maxThink=40, maxNew=70, temp=0.68, topK=22, topP=0.9,
                              repPen=1.28, repWindow=14, onThink, onToken, shouldAbort}={}){
     this.reset();
+    promptIds = this.clamp(promptIds);
     const tk = this.tk;
     const stopIds = new Set([tk.stoi["<user>"], tk.stoi["<eos>"]]);
     /* <mem>/</mem> are NOT banned: the model is trained to write memories and
@@ -194,7 +198,7 @@ class Sigma {
   async intent(userText, persona="sigma"){
     const keep = [this.cacheK, this.cacheV];
     this.reset();
-    const ids = this.tk.encode(`<bos><pers:${persona}><user>${userText}`);
+    const ids = this.clamp(this.tk.encode(`<bos><pers:${persona}><user>${userText}`));
     const out = await this.runStep(ids);
     this.cacheK = keep[0]; this.cacheV = keep[1];
     const d = out.intent_logits.data;
@@ -207,7 +211,7 @@ class Sigma {
   async embed(text){
     const keep = [this.cacheK, this.cacheV];
     this.reset();
-    const ids = this.tk.encode(`<bos><user>${text}`);
+    const ids = this.clamp(this.tk.encode(`<bos><user>${text}`));
     const out = await this.runStep(ids);
     const v = Array.from(out.pooled.data);
     this.cacheK = keep[0]; this.cacheV = keep[1];

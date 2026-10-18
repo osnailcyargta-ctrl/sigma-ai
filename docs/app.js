@@ -8,7 +8,7 @@
 
   const BLOCK = 256;                     // model context window (positional emb)
   const state = {
-    size: localStorage.getItem("sigma.size") || "17m",
+    size: localStorage.getItem("sigma.size") || "22m",
     pers: localStorage.getItem("sigma.pers") || "sigma",
     custom: localStorage.getItem("sigma.custom") || "",
     history: [],          // [{u, a}] working memory (context window)
@@ -124,9 +124,8 @@
       state.model = m; state.tk = m.tk; state.size = size;
       localStorage.setItem("sigma.size", size);
       chipModel.textContent = size.toUpperCase();
-      const P = {"2m":"2,027,930 params · ppl 1.76","5m":"5,162,240 params · ppl 1.55",
-                 "10m":"10,388,272 params · ppl 1.47","17m":"17,337,632 params · ppl 1.48",
-                 "20m":"20,041,280 params","22m":"22,202,408 params"};
+      const P = {"10m":"10,388,272 params · ppl 1.47","17m":"17,337,632 params · ppl 1.48",
+                 "20m":"20,088,768 params · think + interrupts","22m":"22,253,384 params · flagship"};
       $("#modelInfo").textContent = P[size] || "";
       loadState.textContent = `${size} ready`;
       setBtn("idle");

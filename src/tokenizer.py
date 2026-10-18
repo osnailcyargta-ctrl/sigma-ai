@@ -60,11 +60,15 @@ class Tokenizer:
         unk = self.stoi["<unk>"]
         return [self.stoi.get(w, unk) for w in tokenize_text(text)]
 
-    def decode(self, ids, skip_special=True):
+    def decode(self, ids, skip_special=True, return_all=False):
+        """decode(ids) -> clean text (mem/think spans hidden).
+        decode(ids, return_all=True) -> (text, think, mems)."""
         drops = {"<pad>", "<bos>", "<user>", "<ai>",
                  "<memory>", "</memory>"} if skip_special else set()
         words = []
         in_mem = False
+        in_think = False
+        think_words = []
         for i in ids:
             w = self.itos[i] if 0 <= i < len(self.itos) else "<unk>"
             if w == "<mem>":
@@ -73,19 +77,34 @@ class Tokenizer:
             if w == "</mem>":
                 in_mem = False
                 continue
+            if w == "<think>":
+                in_think = True
+                continue
+            if w == "</think>":
+                in_think = False
+                continue
             if in_mem:
+                continue
+            if in_think:
+                if w not in drops and w not in SPECIALS:
+                    think_words.append(w)
                 continue
             if w in drops:
                 continue
             words.append(w)
-        out = ""
-        for w in words:
-            if w == "<nl>":
-                out += "\n"
-            elif w in SPECIALS:
-                continue
-            elif w in {".", ",", "!", "?", ":", ";", "'", ")", "}", "%"} or w == "'s":
-                out += w
-            else:
-                out += (" " if out and not out.endswith(("\n", "(", "{")) else "") + w
-        return out.strip()
+        def join(ws):
+            out = ""
+            for w in ws:
+                if w == "<nl>":
+                    out += "\n"
+                elif w in SPECIALS:
+                    continue
+                elif w in {".", ",", "!", "?", ":", ";", "'", ")", "}", "%"} or w == "'s":
+                    out += w
+                else:
+                    out += (" " if out and not out.endswith(("\n", "(", "{")) else "") + w
+            return out.strip()
+        text = join(words)
+        if return_all:
+            return text, join(think_words), []
+        return text
