@@ -76,6 +76,15 @@ def train_stage(name, lm, lmev, it, max_steps, max_minutes, lr, model_path):
         history = ck.get("history", [])
         print(f"resumed from step {start_step}")
     print(f"== STAGE {name}: {n_par:,} params (d={cfg.d_model} L={cfg.n_layers} ctx={cfg.block_size})", flush=True)
+    # v7: batch scales with model size — 3GB RAM box. 50M at bs20 thrashed into
+    # swap (activations ~700MB on top of 600MB optimizer states) and steps ballooned.
+    if n_par > 35_000_000:
+        bs_lm, bs_it = 10, 4
+    elif n_par > 15_000_000:
+        bs_lm, bs_it = 16, 6
+    else:
+        bs_lm, bs_it = 20, 8
+    print(f"batch: lm {bs_lm} intent {bs_it}", flush=True)
     warm = 100
     def lr_at(s): return lr * min(1.0, (s+1)/warm, 0.1 + 0.45*(1+math.cos(math.pi*min(s,max_steps)/max_steps)))
     t0 = time.time()
@@ -90,12 +99,19 @@ def train_stage(name, lm, lmev, it, max_steps, max_minutes, lr, model_path):
     order = sorted(range(len(lm)), key=lambda i: len(lm[i][0]))
     for step in range(start_step, max_steps):
         if (time.time()-t0)/60 > max_minutes:
-            print("CHUNK_TIME_REACHED"); break
+            print("CHUNK_TIME_REACHED", flush=True); break
         for g in opt.param_groups: g["lr"] = lr_at(step)
-        # batch: ~7/8 LM, ~1/8 intent
-        bs_lm, bs_it = 20, 8
-        s0 = rng.randrange(max(1, len(order) - bs_lm))
-        lmb = [lm[i] for i in order[s0:s0+bs_lm]]
+        # token-budget batch (v7): fill greedily from a random point of the
+        # length-sorted index up to a fixed TOKEN budget — step compute stays
+        # bounded no matter where the window lands (a bs10 window of 256-token
+        # samples on this 3GB box used to swap-thrash to 100s+/step).
+        budget = 1400 if n_par > 35_000_000 else 2600 if n_par > 15_000_000 else 3600
+        s0 = rng.randrange(len(order))
+        lmb, tot, j = [], 0, s0
+        while len(lmb) < bs_lm and j < len(order):
+            L = len(lm[order[j]][0])
+            if lmb and tot + L > budget: break
+            lmb.append(lm[order[j]]); tot += L; j += 1
         itb = rng.sample(it, bs_it)
         x, y, m = pad_batch(lmb)
         xi, li = pad_intent(itb)
@@ -111,6 +127,7 @@ def train_stage(name, lm, lmev, it, max_steps, max_minutes, lr, model_path):
             print(f"step {step:5d} lm {out['lm_loss']:.3f} intent {oi['intent_loss']:.3f} "
                   f"ppl {math.exp(min(out['lm_loss'].item(),10)):.2f} lr {lr_at(step):.2e} "
                   f"{el:.0f}s elapsed", flush=True)
+        if step % 100 == 0 or step == max_steps-1:
             history.append({"step": step, "lm": out["lm_loss"].item(), "intent": oi["intent_loss"].item()})
         if (step + 1) % 400 == 0:
             torch.save({"model": model.state_dict(), "cfg": vars(cfg), "params": n_par,
@@ -119,8 +136,10 @@ def train_stage(name, lm, lmev, it, max_steps, max_minutes, lr, model_path):
     torch.save({"model": model.state_dict(), "cfg": vars(cfg), "params": n_par,
                 "name": name, "step": last_step, "history": history}, model_path)
     done = last_step >= max_steps
-    print("STAGE_COMPLETE" if done else "CHUNK_SAVED", f"at step {last_step}/{max_steps}")
-    # quick eval
+    print("STAGE_COMPLETE" if done else "CHUNK_SAVED", f"at step {last_step}/{max_steps}", flush=True)
+    # quick eval (skip on intermediate chunks: 50M eval burn ~50s per chunk)
+    if os.environ.get("SKIP_EVAL") and not done:
+        return n_par
     with torch.no_grad():
         lmb = lmev[:8]
         x, y, m = pad_batch(lmb)

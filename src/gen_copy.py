@@ -286,8 +286,13 @@ def generate_copies(n_target):
     """Yields session dicts compatible with data_gen.serialize()."""
     out = []
     gens = [fam_echo, fam_delayed, fam_correct, fam_negative, fam_multi,
-            fam_story, fam_spell, fam_insult_named, fam_insult_noname, fam_longname]
-    weights = [12, 13, 13, 14, 12, 6, 6, 7, 7, 10]
+            fam_story, fam_spell, fam_insult_named, fam_insult_noname, fam_longname,
+            fam_block]
+    # v8 PRECISION FINETUNE MIX: long names + block recall + spelling drills
+    # dominate — the 8000-step model copies short/medium OOV perfectly but tails
+    # of 11-13 char names slip (joninibanana->joninibanibani). Spell practice is
+    # literally the letter-precision skill.
+    weights = [8, 9, 9, 9, 11, 3, 6, 4, 4, 22, 15]
     for _ in range(n_target):
         persona = "fake" if R.random() < 0.5 else "sigma"
         fam = R.choices(gens, weights=weights)[0]

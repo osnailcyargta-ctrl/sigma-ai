@@ -141,9 +141,12 @@ def main():
     flows = gen_chat.generate_gameflows(9000)
     pers = personas_gen.generate_personas(2600)
     mem_sessions = gen_memory.generate_sessions(DOG_POOL, 26000)
-    # v5 COPY CURRICULUM: fresh random names every regen (billions-wide space)
+    # v7 COPY CURRICULUM: fresh random names every regen (billions-wide space)
     # -> memorization impossible, true context-copying enforced.
-    copies = gen_copy.generate_copies(44000)
+    copies = gen_copy.generate_copies(60000)
+    # v7: the dog/task pool goes OOV-heavy too — 'my dog is called <x>' must mean
+    # COPY <x>, not sample an in-vocab dog name (the live 'kombu->truffle' bug).
+    dog_pool_mix = DOG_POOL + [gen_copy.rand_name() for _ in range(3000)]
 
     print("[2/6] attaching think traces...")
     unk_watch = 0, 0

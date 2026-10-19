@@ -38,6 +38,7 @@ def configs(vocab=1446, block=256):
         "17m": Config(vocab, 416, 8, 8, block),
         "20m": Config(vocab, 448, 8, 8, block),
         "22m": Config(vocab, 472, 8, 8, block),
+        "50m": Config(vocab, 640, 10, 10, block),
     }
 
 class CausalSelfAttention(nn.Module):

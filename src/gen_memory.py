@@ -6,19 +6,26 @@ so recall answers must COPY char-spelled values from the <memory> block —
 open-vocabulary memory, not a closed tag list."""
 import random
 from gen_chat import NAMES, _PETS, _CITIES, _BANDS, _TAGS
+from gen_copy import rand_name
 
 R = random.Random(777)
 
+def _mix(pool, oov_p):
+    """in-vocab value with prob (1-oov_p), else a FRESH random OOV name.
+    OOV values are char-spelled by the tokenizer, so every mixed session
+    teaches write-copy + recall-copy for open-vocabulary memory."""
+    return R.choice(pool) if R.random() >= oov_p else rand_name(R)
+
 def E_pers():
-    n = R.choice(NAMES)
+    n = _mix(NAMES, 0.55)
     c = R.choice(["red","blue","black","green","purple","white","yellow","pink"])
     job = R.choice(["barista","student","nurse","designer","driver","teacher","cashier","dev"])
     sub = R.choice(["biology","history","math","art","physics","economics"])
-    pet, pn = R.choice([("dog", R.choice(_PETS)), ("cat", R.choice(_PETS)),
-                        ("rabbit", R.choice(["bun","clover","mochi","thumper"])),
-                        ("bird", R.choice(["kiwi","mango","echo","pipl"])),
-                        ("hamster", R.choice(["pip","nugget","biscuit","waffle"]))])
-    city = R.choice(_CITIES)
+    pet, pn = R.choice([("dog", _mix(_PETS, 0.6)), ("cat", _mix(_PETS, 0.6)),
+                        ("rabbit", _mix(["bun","clover","mochi","thumper"], 0.5)),
+                        ("bird", _mix(["kiwi","mango","echo","pipl"], 0.5)),
+                        ("hamster", _mix(["pip","nugget","biscuit","waffle"], 0.5))])
+    city = _mix(_CITIES, 0.4)
     return [
         (f"user's name is {n}",
          [f"what is my name?", "who am i again?", "do you remember my name?", "whats my name?"],
@@ -163,6 +170,10 @@ def part2_session(events):
 
 def generate_sessions(dog_pool, n_target):
     """Yield dicts: {'block': str|None, 'turns': [...] , 'kind':'mem1'|'mem2'}"""
+    # v7: task pool goes OOV-heavy — 'feed <dog>' facts must COPY the dog name,
+    # not sample an in-vocab one (live bug: 'kombu' -> invented 'truffle').
+    import gen_copy as _gc
+    dog_pool = list(dog_pool) + [_gc.rand_name() for _ in range(3000)]
     out = []
     pools = [E_pers(), E_plans(), E_scores(), E_decide()]
     for _ in range(n_target):

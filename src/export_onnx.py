@@ -141,5 +141,21 @@ def export(stage, verify=True):
     return path
 
 if __name__ == "__main__":
+    import math
     for s in sys.argv[1:]:
-        export(s)
+        p = export(s)
+        # github hard-limits files at 100MB: byte-split big exports into
+        # .onnx.partN (browser fetchModelBuf concats before parsing — safe at
+        # any split point since parsing happens on the reassembled buffer)
+        size = os.path.getsize(p)
+        if size > 95_000_000:
+            with open(p, "rb") as f:
+                data = f.read()
+            n = math.ceil(size / 90_000_000)
+            per = math.ceil(size / n)
+            base = os.path.splitext(p)[0]
+            for i in range(n):
+                with open(f"{base}.onnx.part{i+1}", "wb") as f:
+                    f.write(data[i*per:(i+1)*per])
+            os.remove(p)
+            print(f"   sharded -> {n} parts x {per/1e6:.1f} MB ({os.path.basename(base)}.onnx.part1..{n})")

@@ -80,6 +80,10 @@ def chat(model, tk, persona, history, user, max_new=70, temp=0.65, verbose_think
             eff_temp, top_k = 0.02, 3
             if agen[-1] == agen[-2]:
                 lg[agen[-1]] = -1e9
+            if len(agen) >= 4:                      # cycle guard: X,Y,X,Y -> ban X
+                a, b, c, d = agen[-4:]
+                if a == c and b == d and a != b:
+                    lg[agen[-2]] = -1e9
         lg2 = lg.clone()
         for v in set(agen[-14:]):
             if v in banned:

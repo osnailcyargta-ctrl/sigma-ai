@@ -149,6 +149,14 @@ class Sigma {
       if (gen[gen.length-1] === gen[gen.length-2]){          // no 3rd identical letter
         ban = new Set(ban); ban.add(gen[gen.length-1]);
       }
+      // cycle guard: period-2 letter loops (ananana, sasasa) — if the last four
+      // letters are X,Y,X,Y, the next X would extend the cycle: ban it.
+      if (gen.length >= 4){
+        const [a, b, c, d] = gen.slice(-4);
+        if (a === c && b === d && a !== b){
+          ban = new Set(ban); ban.add(gen[gen.length-2]);
+        }
+      }
     }
     const z = new Float32Array(V);
     let mx = -Infinity;

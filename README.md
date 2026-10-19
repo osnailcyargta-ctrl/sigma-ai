@@ -10,7 +10,8 @@ was trained from zero on a corpus generated from zero, on a 2-core CPU.
 | `10m` | 10,388,272 | trained — eval ppl 1.47, game-intent acc ~100% |
 | `17m` | 17,337,632 | trained — eval ppl 1.48, game-intent acc ~100% |
 | `20m` | 20,088,768 | trained — think traces + interrupt discipline, intent acc 100% |
-| `22m` | 22,276,040 | **flagship** — char-copy memory (open-vocabulary), think traces, interrupt discipline, eval ppl 1.19, intent acc 100% |
+| `22m` | 22,276,040 | trained — char-copy memory (open-vocabulary), think traces, eval ppl 1.19, intent acc 100% |
+| `50m` | 50,362,240 | **flagship** — open-vocabulary copy memory v2 (fresh-random-name curriculum, write→recall self-consistent), letter-precision fine-tune, eval ppl 1.15, intent acc 100%; ships as 3 shards (github 100MB/file limit), browser reassembles before parse |
 
 (2M and 5M checkpoints were retired from the repo at the 20M milestone.)
 

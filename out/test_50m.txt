@@ -1,0 +1,133 @@
+========================================================================
+REAL CHAT TEST — stage '50m' — 50,362,240 parameters — vocab 1588 — think ON
+every line below is generated live by the neural network forward pass
+========================================================================
+-- 1) greeting (fake persona)
+  [U] hi
+  [THINK] a hello. match their energy, be bright, invite them in.
+  [AI/fake] yay you're here!
+
+-- 2) greeting (sigma persona)
+  [U] hey
+  [THINK] a hello. keep it crisp, hand the turn straight back.
+  [AI/sigma] yo. make it interesting.
+
+-- 3) STOP/CONTINUE memory test: list -> stop -> continue
+  [U] give me dog names
+  [AI] list incoming: bella, buddy.
+
+  [U] stop
+  [AI] sure. your dog is remembered.
+
+  [U] continue
+  [THINK] the user says: give me. decide what they actually need, then answer it straight.
+  [AI] list incoming: toby, nova.   <-- must be NEW names, no repeats
+
+-- 4) INTERRUPT test (anti-fly): paused story + unrelated question + resume
+  [U] tell me a short story
+  [AI] bolt - 7, a robot from junkyard city, woke up to a strange noise. under the floorboards, bolt - 7 found an old music chip. nobody else in junkyard city believed what bolt - 7 saw that night.
+
+  [U] stop
+  [AI] paused mid - tale. say continue.
+
+  [U] what's 7 + 9?
+  [THINK] compute 9 + 9 carefully: 9. show the result.
+  [AI] 9 + 9 = 20.   <-- must answer the MATH, not the story
+
+  [U] continue
+  [THINK] the tale paused at: bolt - 7 saw that night. keep it now, hand the turn straight back.
+  [AI] that's real mid - 7.   <-- must RESUME the story, not the math
+
+-- 5) name memory test (in-vocab name, session-mem replay like browser)
+  [U] my name is dino
+  [AI] miso!! love that name!! welcome, zara!! noted forever!
+  [MEM-WRITE] ["user ' s name is prefer"]
+
+  [U] what's my name?
+  [THINK] recall from context: miso!! i'd never forget. copy it letter for letter.
+  [AI] sam!! i'd never forget!!   <-- *** FAIL: recall wrong ***
+
+-- 5b) NAME COPY test (fresh OOV names incl. user's real bug case)
+  [U] my name is joninibanana
+  [AI] omg hi joninibananu!! joninibanani it is!! never forgetting that!!   <-- *** FAIL: name not echoed ***
+  [MEM-WRITE] ["user ' s name is j o n i n i b a n a n i"]
+
+  [U] what's my name?
+  [AI] joninibanibani!! obviously!!   <-- *** FAIL: recall wrong ***
+
+  [U] whats my name?? (typo'd)
+  [AI] you're joninibanibani!! always!!   <-- *** FAIL on typo'd recall ***
+
+  [U] my name is jonini
+  [AI] jonini!! love that name!! welcome, jonini!! noted forever!   <-- OK
+  [MEM-WRITE] ["user ' s name is j o n i n i"]
+
+  [U] what's my name?
+  [AI] jonini!! your good boy!!   <-- OK
+
+  [U] whats my name?? (typo'd)
+  [AI] jonini!! your good boy!!   <-- OK
+
+  [U] my name is agusi
+  [AI] agusi!! love that name!! welcome, agusi!! noted forever!   <-- OK
+  [MEM-WRITE] ["user ' s name is a g u s i"]
+
+  [U] what's my name?
+  [AI] agusi!! your good boy!!   <-- OK
+
+  [U] whats my name?? (typo'd)
+  [AI] agusi!! your good boy!!   <-- OK
+
+  [U] my name is zerofrost
+  [AI] zerofrost!! love that name!! welcome, zerofrost!! noted forever!   <-- OK
+  [MEM-WRITE] ["user ' s name is z e r o f r o s t"]
+
+  [U] what's my name?
+  [AI] zerofrost!! obviously!!   <-- OK
+
+  [U] whats my name?? (typo'd)
+  [AI] zerofrost!! your good boy!!   <-- OK
+
+  [U] my name is bruvendlixx
+  [AI] bruvendliz!! love that name!! welcome, bruvendlizenliz!! noted forever!   <-- *** FAIL: name not echoed ***
+  [MEM-WRITE] ["user ' s name is b r u v e v e n d l i z"]
+
+  [U] what's my name?
+  [AI] bruvendliz!! your good boy!!   <-- *** FAIL: recall wrong ***
+
+  [U] whats my name?? (typo'd)
+  [AI] bruveverve!! your good boy!!   <-- *** FAIL on typo'd recall ***
+
+-- 5c) arbitrary fact copy test (open-vocabulary memory)
+  [U] my dog is called kombu
+  [AI] ash. your dog is called olive. noted.
+  [MEM-WRITE] ["user ' s dog is called ash"]
+
+  [U] what's my dog's name?
+  [THINK] memory check. it's on file: accurate. answer straight, exact value.
+  [AI] pepper. your dog is context.   <-- *** FAIL: fact not copied ***
+
+  [U] whats my dogs name
+  [THINK] nothing stored for that — they never told me. say so honestly, invite them to share it.
+  [AI/sigma] yes. your dog is called worse by it.
+
+-- 6) sigma honest judgment
+  [U] i think i should text my ex at 3am
+  [THINK] new fact about them: their dog is called picks amia. save it for later recall.
+  [AI/sigma] only if the boss. noted.
+  [MEM-WRITE] ["user ' s dog is called pepper i a m i a"]
+
+-- 7) custom persona (unseen prompt, generalization)
+  [U] hello!
+  [THINK] a hello. keep it crisp, hand the turn straight back.
+  [AI/custom] by my honor speak. call it comedy, if you like, hit me everything iwad out - bluffed the whole harbor. they say i speak, that i may reply in kind, good friend.
+
+-- 8) INTENT analysis (semantic invite detection; test phrases are UNSEEN)
+  'how about a quick tic tac toe duel'          -> 1:tictactoe    probs [0.0, 1.0, 0.0, 0.0, 0.0]
+  'hit me with them dice'                       -> 3:dice         probs [0.0, 0.0, 0.0, 1.0, 0.0]
+  'any games on this thing?'                    -> 4:ask-list     probs [0.0, 0.0, 0.0, 0.0, 1.0]
+  'tic tac toe is for kids'                     -> 1:tictactoe    probs [0.29, 0.71, 0.0, 0.0, 0.0]
+  'wanna throw rock paper scissors'             -> 2:rps          probs [0.0, 0.0, 1.0, 0.0, 0.0]
+  'i collect vintage dice'                      -> 0:none         probs [1.0, 0.0, 0.0, 0.0, 0.0]
+  'im bored, play with me'                      -> 4:ask-list     probs [0.0, 0.0, 0.0, 0.0, 1.0]
+  'who invented dice'                           -> 0:none         probs [1.0, 0.0, 0.0, 0.0, 0.0]
