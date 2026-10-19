@@ -12,6 +12,7 @@
     pers: localStorage.getItem("sigma.pers") || "sigma",
     custom: localStorage.getItem("sigma.custom") || "",
     history: [],          // [{u, a}] working memory (context window)
+    sessionMems: [],      // the model's OWN <mem> writes this session — always replayed
     model: null, tk: null, loading: false,
     generating: false, abort: false, lastSend: 0,
   };
@@ -40,12 +41,12 @@
     return dot / (Math.sqrt(na) * Math.sqrt(nb) + 1e-9);
   }
 
-  async function retrieve(queryEmb, k = 2){
+  async function retrieve(queryEmb, k = 3){
     const rows = await MEM.all();
     if (!rows.length) return [];
     return rows.map(r => ({ ...r, sim: cosine(queryEmb, r.emb) }))
                .sort((a, b) => b.sim - a.sim).slice(0, k)
-               .filter(r => r.sim > 0.45);      // strict: only genuinely related memories
+               .filter(r => r.sim > 0.35);      // wide enough to catch name recalls
   }
 
   async function refreshMemList(){
@@ -136,27 +137,39 @@
     state.loading = false;
   }
 
-  /* ---------------- prompt assembly (the 3-layer memory) ---------------- */
-  async function buildPrompt(userText, memRows){
-    let s = `<bos><pers:${state.pers}>`;
-    if (state.pers === "custom") {
-      s += (state.custom.trim() || "you are helpful, honest and a little witty") + "<nl>";
+  /* ---------------- prompt assembly (the 3-layer memory) ----------------
+   * Greedy newest-first packing: persona + <memory> block + current turn are
+   * ALWAYS kept; older turns are added newest-first, only as COMPLETE turns.
+   * The old slice(-keep) could cut a char-spelled name in half mid-sequence
+   * ('joninibanana' -> '...nibanana') — that alone destroyed recall.
+   * The <memory> block carries: (a) the model's OWN <mem> writes from this
+   * session — always, because recall must never depend on a similarity
+   * threshold — plus (b) long-term rows that semantically match the query.
+   * Replaying the model's own written memories is exactly the trained
+   * <memory>-block format, so this is in-distribution, not tag matching. */
+  async function buildPromptIds(userText, memRows, model){
+    const tk = model.tk;
+    const keep = BLOCK - (model.hasThink ? 34 : 2) - 74;
+    const head = `<bos><pers:${state.pers}>` +
+      (state.pers === "custom" ? (state.custom.trim() || "you are helpful, honest and a little witty") + "<nl>" : "");
+    const sessRows = state.sessionMems.slice(-6)
+      .map(t => "• " + t);
+    const seen = new Set(sessRows.map(r => r.slice(2).toLowerCase()));
+    const retrRows = (memRows || [])
+      .filter(r => !seen.has(r.text.toLowerCase()))
+      .map(r => "• " + r.text);
+    const allRows = retrRows.concat(sessRows).slice(-8);
+    const mblock = allRows.length ? "<memory>" + allRows.join(" ") + "</memory>" : "";
+    const cur = `<user>${userText}<ai>`;
+    let room = keep - tk.encode(head + mblock + cur).length;
+    const parts = [];
+    for (let i = state.history.length - 1; i >= 0; i--){
+      const s = `<user>${state.history[i].u}<ai>${state.history[i].a}`;
+      const c = tk.encode(s).length;
+      if (c > room) break;
+      parts.unshift(s); room -= c;
     }
-    if (memRows && memRows.length){
-      s += "<memory>" + memRows.map(r => "• " + r.text).join(" ") + "</memory>";
-    }
-    // working memory: last 3 turns keep the context tight like training
-    for (const t of state.history.slice(-3)) s += `<user>${t.u}<ai>${t.a}`;
-    s += `<user>${userText}<ai>`;
-    return s;
-  }
-
-  /* leave room inside the 256-token window for the generated reply */
-  function clampPrompt(promptText, model){
-    const budget = (model.hasThink ? 46 : 2) + 74;
-    const ids = model.tk.encode(promptText);
-    const keep = BLOCK - budget;
-    return ids.length > keep ? ids.slice(-keep) : ids;
+    return tk.encode(head + mblock + parts.join("") + cur);
   }
 
   /* ---------------- send flow ---------------- */
@@ -195,10 +208,10 @@
        * Math-shaped turns decode near-greedy: the model memorized exact sums,
        * sampling noise would only corrupt recall (still the model doing the math). */
       const isMath = /\b\d+\s*[+x\-]\s*\d+/.test(text) || /^count to \d+/.test(text.trim());
-      const promptIds = clampPrompt(await buildPrompt(text, memRows), state.model);
+      const promptIds = await buildPromptIds(text, memRows, state.model);
       let answer = "", stopped = false, tokCount = 0;
       const gen = await state.model.generate(promptIds, {
-        maxThink: 42, maxNew: 72, temp: isMath ? 0.12 : 0.65, topK: isMath ? 4 : 20, topP: 0.9,
+        maxThink: 34, maxNew: 72, temp: isMath ? 0.12 : 0.65, topK: isMath ? 4 : 20, topP: 0.9,
         shouldAbort: () => state.abort,
         onThink: (txt, done) => {
           if (state.model.hasThink) ui.thinkBody.textContent = txt;
@@ -220,6 +233,8 @@
 
       /* 4) learn: the model itself decided what to save via its <mem> markers */
       for (const mtext of gen.mems){
+        state.sessionMems.push(mtext);
+        if (state.sessionMems.length > 20) state.sessionMems.shift();
         await MEM.add({ text: mtext, emb: await state.model.embed(mtext), t: Date.now() });
       }
       await refreshMemList();
@@ -273,6 +288,7 @@
   $("#btnNew").onclick = () => {
     if (state.generating) state.abort = true;
     state.history = [];
+    state.sessionMems = [];
     if (state.model) state.model.reset();
     greet(); GAMES.closeAll();
   };

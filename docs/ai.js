@@ -85,6 +85,7 @@ class Tok {
 const MDIMS = {   // [n_layers, n_heads, d_model, vocab_rows] per checkpoint
   "2m": [5, 5, 170, 1446], "5m": [6, 8, 256, 1446], "10m": [6, 8, 368, 1446],
   "17m": [8, 8, 416, 1446], "20m": [8, 8, 448, 1538], "22m": [8, 8, 472, 1588],
+  "50m": [10, 10, 640, 1588],
 };
 
 class Sigma {
@@ -101,8 +102,7 @@ class Sigma {
 
   static async load(size, onProgress){
     const tk = await Tok.load();
-    const url = `models/${size}.onnx`;
-    const buf = await fetchWithProgress(url, onProgress);
+    const buf = await fetchModelBuf(size, onProgress);
     const sess = await ort.InferenceSession.create(buf, { executionProviders: ["wasm"], graphOptimizationLevel: "all" });
     return new Sigma(sess, tk, size);
   }
@@ -131,9 +131,25 @@ class Sigma {
     return logits.data.subarray((T-1)*V, T*V);
   }
 
-  /* one softmax sampling step over a logits row */
+  /* one softmax sampling step over a logits row. Repetition penalty NEVER
+   * hits single letter/digit tokens: the model spells OOV names letter-by-letter
+   * (joninibanana -> j o n i n i ...), and penalizing repeated letters is what
+   * turned real names into soup like 'kanin' / 'ionnpi'. Words still get
+   * penalized so normal replies don't loop.
+   * LETTER-RUN GREEDY: while the model is mid-spelling (last 2 emitted tokens
+   * are single letters), decoding goes near-greedy — copying is a precision
+   * task, sampling noise per letter compounds over 10+ letters. A triple
+   * repeat guard prevents greedy letter loops ('ccc...'). */
   sample(row, {temp, topK, topP, ban, repPen, repWindow, gen}){
     const V = row.length;
+    const isSing = (v) => { const w = this.tk.itos[v]; return w != null && w.length === 1 && /[a-z0-9]/.test(w); };
+    let effTemp = temp, effTopK = topK;
+    if (gen && gen.length >= 2 && isSing(gen[gen.length-1]) && isSing(gen[gen.length-2])){
+      effTemp = 0.02; effTopK = 3;
+      if (gen[gen.length-1] === gen[gen.length-2]){          // no 3rd identical letter
+        ban = new Set(ban); ban.add(gen[gen.length-1]);
+      }
+    }
     const z = new Float32Array(V);
     let mx = -Infinity;
     for (let v = 0; v < V; v++){
@@ -143,7 +159,9 @@ class Sigma {
         let hit = false;
         for (let i = Math.max(0, gen.length - repWindow); i < gen.length; i++)
           if (gen[i] === v){ hit = true; break; }
-        if (hit) x = x > 0 ? x / repPen : x * repPen;
+        if (hit){
+          if (!isSing(v)) x = x > 0 ? x / repPen : x * repPen;
+        }
       }
       z[v] = x; if (x > mx) mx = x;
     }
@@ -153,13 +171,13 @@ class Sigma {
     for (let v = 0; v < V; v++) probs[v] /= sum;
     const idxs = Array.from({length: V}, (_, v) => v);
     idxs.sort((a,b) => probs[b] - probs[a]);
-    const kept = idxs.slice(0, topK);
+    const kept = idxs.slice(0, effTopK);
     let cum = 0; const kept2 = [];
     for (const v of kept){ kept2.push(v); cum += probs[v]; if (cum >= topP) break; }
     const tot = kept2.reduce((s,v) => s + probs[v], 0);
     let r = Math.random() * tot, pick = kept2[0];
     for (const v of kept2){ r -= probs[v]; if (r <= 0){ pick = v; break; } }
-    return temp <= 0.01 ? kept2[0] : pick;
+    return effTemp <= 0.01 ? kept2[0] : pick;
   }
 
   /* full two-phase reply:
@@ -169,7 +187,7 @@ class Sigma {
    *  shouldAbort()        — polled between steps; true -> return partial
    * Old checkpoints have no <think> token: the app fills the thinking panel
    * with real telemetry (intent probs, recalled memories) instead. */
-  async generate(promptIds, {maxThink=40, maxNew=70, temp=0.68, topK=22, topP=0.9,
+  async generate(promptIds, {maxThink=34, maxNew=70, temp=0.68, topK=22, topP=0.9,
                              repPen=1.28, repWindow=14, onThink, onToken, shouldAbort}={}){
     this.reset();
     promptIds = this.clamp(promptIds);
@@ -248,8 +266,9 @@ class Sigma {
   }
 }
 
-function fetchWithProgress(url, onProgress){
-  return fetch(url).then(res => {
+async function fetchWithProgress(url, onProgress, tries = 3){
+  const once = () => fetch(url, { cache: "default" }).then(res => {
+    if (!res.ok) throw new Error("HTTP " + res.status + " for " + url);
     const total = +res.headers.get("content-length") || 0;
     if (!res.body || !total) return res.arrayBuffer();
     const reader = res.body.getReader(); const chunks = []; let got = 0;
@@ -265,6 +284,30 @@ function fetchWithProgress(url, onProgress){
       return buf.buffer;
     });
   });
+  let err;
+  for (let i = 0; i < tries; i++){
+    try { return await once(); }
+    catch (e){ err = e; await new Promise(r => setTimeout(r, 700)); }
+  }
+  throw err;
+}
+
+/* big checkpoints ship as byte-split shards (github 100MB/file limit):
+ * fetch parts sequentially, concat into one buffer, progress is aggregate */
+const SHARDS = { "50m": 3, "100m": 5 };
+async function fetchModelBuf(size, onProgress){
+  const n = SHARDS[size] || 1;
+  if (n === 1) return fetchWithProgress(`models/${size}.onnx`, onProgress);
+  const parts = [];
+  for (let i = 1; i <= n; i++){
+    const base = i / n - (1 / n);                       // progress offset of this part
+    parts.push(await fetchWithProgress(`models/${size}.onnx.part${i}`,
+                 p => onProgress && onProgress(base + p / n)));
+  }
+  const tot = parts.reduce((s, b) => s + b.byteLength, 0);
+  const buf = new Uint8Array(tot); let off = 0;
+  for (const b of parts){ buf.set(new Uint8Array(b), off); off += b.byteLength; }
+  return buf.buffer;
 }
 
 window.SIGMA = { Tok, Sigma, SPECIALS };

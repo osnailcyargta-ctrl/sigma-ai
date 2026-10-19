@@ -14,7 +14,7 @@ so existing checkpoints keep working (they just clamp the new ids)."""
 import os, sys, pickle, json, random
 sys.path.insert(0, os.path.dirname(__file__))
 import tokenizer as tokmod
-import gen_chat, gen_memory, personas_gen, gen_think
+import gen_chat, gen_memory, personas_gen, gen_think, gen_copy
 
 R = random.Random(99)
 DATA = os.path.join(os.path.dirname(__file__), "..", "data")
@@ -141,6 +141,9 @@ def main():
     flows = gen_chat.generate_gameflows(9000)
     pers = personas_gen.generate_personas(2600)
     mem_sessions = gen_memory.generate_sessions(DOG_POOL, 26000)
+    # v5 COPY CURRICULUM: fresh random names every regen (billions-wide space)
+    # -> memorization impossible, true context-copying enforced.
+    copies = gen_copy.generate_copies(44000)
 
     print("[2/6] attaching think traces...")
     unk_watch = 0, 0
@@ -148,49 +151,22 @@ def main():
     for s in flows: add_thinks(s, "flow")
     for s in pers: add_thinks(s, "persona")
     for s in mem_sessions: add_thinks(s, s.get("kind", "mem"))
+    for s in copies: add_thinks(s, "copy")
 
-    print("[3/6] building vocab3 (= vocab2 verbatim, + missing letters, + new words)...")
-    # v4: start from vocab2 AS-IS so ids 0..1539 stay byte-identical for every
-    # existing checkpoint, then append the missing letters, then new words.
-    with open(os.path.join(DATA, "vocab2.json"), "r", encoding="utf-8") as f:
-        base = json.load(f)
-    old_len = len(base)
-    if "<think>" not in base:
-        base = base + ["<think>", "</think>"]
-    import string as _string
-    missing_letters = [c for c in _string.ascii_lowercase if c not in base]
-    base = base + missing_letters
-    tk = tokmod.Tokenizer(base)
-
-    # extend with new words from think traces + new families (ids appended after
-    # the letters; existing checkpoints never see ids beyond their table -> clamp)
-    from collections import Counter
-    cnt = Counter()
-    for s in core + flows + pers + mem_sessions:
-        for th in s["thinks"]:
-            cnt.update(tokmod.tokenize_text(th))
-        for u, a in s["turns"]:
-            cnt.update(tokmod.tokenize_text(u))
-            cnt.update(tokmod.tokenize_text(a))
-    # append-only across regens: previous vocab3 keeps its EXACT order (trained
-    # embeddings are id-addressed!), new candidates are appended at the end.
-    additions = []
+    print("[3/6] vocab3 FROZEN (byte-identical ids for every checkpoint)...")
+    # v5: vocab3 is FROZEN. Its 1588 ids already cover every letter + digit +
+    # punctuation; the copy curriculum deliberately lives on letters, so no new
+    # words are needed. Freezing keeps old checkpoints (10m/17m/20m) aligned.
     vp = os.path.join(DATA, "vocab3.json")
-    if os.path.exists(vp):
-        with open(vp, "r", encoding="utf-8") as f:
-            prev = json.load(f)
-        additions = list(prev[len(base):])          # preserve prior ids verbatim
-    additions += [w for w, c in cnt.most_common(1200)
-                  if c >= 3 and w not in tk.stoi and w not in additions][:400]
-    tk = tokmod.Tokenizer(base + additions)
-    tk.save(os.path.join(DATA, "vocab3.json"))
+    with open(vp, "r", encoding="utf-8") as f:
+        tk = tokmod.Tokenizer(json.load(f))
+    tk.save(vp)
     stoi = tk.stoi
-    print(f"  vocab3 size: {len(tk)} (old: {old_len}, +<think>/</think> "
-          f"+{len(missing_letters)} letters {missing_letters} +{len(additions)} new words)")
+    print(f"  vocab3 size: {len(tk)} (frozen)")
 
     # OOV check on think text (want < 2%)
     tot, oov = 0, 0
-    for s in core + flows + pers + mem_sessions:
+    for s in core + flows + pers + mem_sessions + copies:
         for th in s["thinks"]:
             for w in tokmod.tokenize_text(th):
                 tot += 1
@@ -199,11 +175,14 @@ def main():
 
     print("[4/6] serializing LM samples with masks...")
     samples = []
-    for s in core + flows + pers + mem_sessions:
+    dropped = 0
+    for s in core + flows + pers + mem_sessions + copies:
         r = serialize(s, stoi)
         if r: samples.append(r)
+        else: dropped += 1
     intent = gen_intent()
-    print("  lm samples:", len(samples), " intent samples:", len(intent))
+    print("  lm samples:", len(samples), " intent samples:", len(intent),
+          f" (dropped>256tok: {dropped}, copy sessions: {len(copies)})")
 
     R.shuffle(samples)
     n_eval = int(len(samples) * 0.015)

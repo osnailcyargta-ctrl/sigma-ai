@@ -133,6 +133,7 @@ def think_for(u, a, ctx=None):
         return R.choice([
             f"new fact: their name is {n}. confirm it and write it to memory.",
             f"they gave a name: {n}. store it, say it back once.",
+            f"a name to keep: {n}. echo it letter-perfect, then write the memory marker.",
         ])
     if mem:
         return R.choice([
@@ -144,10 +145,17 @@ def think_for(u, a, ctx=None):
     if any(w in ul for w in ("what's my","whats my","do you remember","who am i","did i","what did i",
                              "my name?","my pet","my dog","my favorite","my test","my job","remind")):
         core = a.replace("<mem>"," ").replace("</mem>"," ")
-        core = " ".join(core.split()[:9])
+        low_a = core.lower()
+        if any(k in low_a for k in ("haven't", "not told", "don't know", "never told", "wasn't going to guess")):
+            return R.choice([
+                "nothing stored for that — they never told me. say so honestly, invite them to share it.",
+                "no name or fact on file. honesty beats inventing one. ask for it.",
+            ])
+        first = core.split(".")[0].strip().rstrip(",!? ").lower()
         return R.choice([
-            f"memory check. the block holds it: {core.lower().rstrip('.,')}. answer straight.",
-            f"read the memory block first: {core.lower().rstrip('.,')}. then answer.",
+            f"memory check. it's on file: {first}. answer straight, exact value.",
+            f"they want it back. i hold it: {first}. give it exact, zero paraphrase.",
+            f"recall from context: {first}. copy it letter for letter.",
         ])
 
     # ---- math / count ----
