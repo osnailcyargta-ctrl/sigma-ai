@@ -351,6 +351,70 @@
   $("#customPrompt").addEventListener("input", e => { state.custom = e.target.value; localStorage.setItem("sigma.custom", state.custom); });
 
   $("#btnClearMem").onclick = async () => { await MEM.clear(); refreshMemList(); };
+
+  /* ---------------- pixel art studio (32x32 diffusion, real generation) ---------------- */
+  const PX = { gen: null, loading: false, busy: false };
+  async function pixelStudio(){
+    GAMES.closeAll();
+    const dock = document.getElementById("gameDock");
+    const p = document.createElement("div");
+    p.className = "game pixel-game";
+    p.innerHTML = `
+      <div class="game-head"><div class="game-title">Pixel Studio</div>
+        <div class="game-note">32×32 diffusion · denoises pure noise · every image unique</div>
+        <button class="game-x" title="close">✕</button></div>
+      <div class="px-row">
+        <div class="px-classes">${SIGMA_PIXEL.CLASSES.map((c,i) =>
+          `<button class="px-cls${i===0?" active":""}" data-c="${i}">${c}</button>`).join("")}</div>
+        <button class="rps-btn" id="pxGo" style="flex:0 0 auto;padding:10px 16px">✨ Generate</button>
+      </div>
+      <div class="px-canvas-wrap"><canvas id="pxCanvas" width="256" height="256"></canvas>
+        <div id="pxStatus" class="px-status">weights not loaded yet</div></div>
+      <div class="px-actions"><a id="pxDl" class="px-dl" download="sigma-pixel.png" style="display:none">⤓ Download PNG</a></div>`;
+    p.querySelector(".game-x").onclick = () => dock.innerHTML = "";
+    dock.appendChild(p);
+    dock.scrollIntoView({behavior:"smooth", block:"end"});
+    const status = p.querySelector("#pxStatus"), canvas = p.querySelector("#pxCanvas");
+    const ctx = canvas.getContext("2d");
+    ctx.imageSmoothingEnabled = false;
+    let cls = 0;
+    p.querySelectorAll(".px-cls").forEach(b => b.onclick = () => {
+      cls = +b.dataset.c;
+      p.querySelectorAll(".px-cls").forEach(x => x.classList.toggle("active", x === b));
+    });
+    /* lazy-load weights on first open */
+    if (!PX.gen && !PX.loading){
+      PX.loading = true;
+      status.textContent = "loading diffusion weights…";
+      try {
+        PX.gen = await SIGMA_PIXEL.PixelGen.load(pr => {
+          status.textContent = `loading diffusion weights… ${Math.round(pr*100)}%`;
+        });
+        status.textContent = "ready — pick a subject and generate";
+      } catch (e){ console.error(e); status.textContent = "load failed — check connection, it caches after"; }
+      PX.loading = false;
+    }
+    p.querySelector("#pxGo").onclick = async () => {
+      if (!PX.gen || PX.busy) return;
+      PX.busy = true;
+      const btn = p.querySelector("#pxGo"); btn.disabled = true;
+      try {
+        const img = await PX.gen.generate(cls, { steps: 40, temp: 1.1, onStep: (i, n) => {
+          status.textContent = `denoising… step ${i}/${n}`;
+        }});
+        const off = new OffscreenCanvas(32, 32);
+        off.getContext("2d").putImageData(new ImageData(img, 32, 32), 0, 0);
+        ctx.imageSmoothingEnabled = false;
+        ctx.clearRect(0, 0, 256, 256);
+        ctx.drawImage(off, 0, 0, 256, 256);
+        status.textContent = `done — a ${SIGMA_PIXEL.CLASSES[cls]} invented from noise`;
+        const dl = p.querySelector("#pxDl");
+        dl.href = canvas.toDataURL("image/png"); dl.style.display = "inline-block";
+      } catch (e){ console.error(e); status.textContent = "generation hiccup: " + e.message; }
+      btn.disabled = false; PX.busy = false;
+    };
+  }
+  $("#btnPixel").onclick = pixelStudio;
   $("#btnNew").onclick = () => {
     if (state.generating) state.abort = true;
     state.history = [];

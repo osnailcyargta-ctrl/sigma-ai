@@ -45,6 +45,13 @@
     </div>
 
     <div class="side-section">
+      <div class="side-label">Pixel art studio</div>
+      <button id="btnPixel" class="btn-new" style="text-align:left">🎨 Generate pixel art
+        <span style="display:block;font-size:11px;color:var(--ink2);font-weight:400">32×32 diffusion model — real generation</span>
+      </button>
+    </div>
+
+    <div class="side-section">
       <div class="side-label">Long-term memory <span id="memCount" class="pill">0</span></div>
       <div id="memList" class="mem-list"><div class="mem-empty">memory is empty — tell it something about you</div></div>
       <button id="btnClearMem" class="btn-ghost">Clear memory</button>
@@ -100,6 +107,7 @@
 </div>
 <script src="ort.min.js"></script>
 <script src="ai.js"></script>
+<script src="pixel.js"></script>
 <script src="games.js"></script>
 <script src="app.js"></script>
 </body>

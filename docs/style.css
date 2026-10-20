@@ -156,3 +156,19 @@ body.mode-shakes .think-star{color:#8a6d1d}
 body.mode-shakes .ttt-cell{background:#fbf7ec}
 body.mode-shakes .die,body.mode-shakes .rps-btn{background:#fbf7ec}
 body.mode-shakes .pers-item.active{border-color:#c9a959;background:#f6efd9}
+
+/* ---------- pixel studio ---------- */
+.pixel-game{max-width:420px}
+.px-row{display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap;margin-top:10px}
+.px-classes{display:flex;gap:5px;flex-wrap:wrap;flex:1}
+.px-cls{border:1px solid var(--line);background:#fafafa;border-radius:9px;padding:7px 10px;
+  font-size:12px;font-weight:600;cursor:pointer;color:var(--ink)}
+.px-cls.active{border-color:#18181b;background:#18181b;color:#fff}
+.px-canvas-wrap{margin-top:12px;display:flex;flex-direction:column;align-items:center;gap:8px}
+#pxCanvas{width:256px;height:256px;border:1px solid var(--line);border-radius:12px;background:#fff;
+  image-rendering:pixelated}
+.px-status{font-size:12px;color:var(--ink2)}
+.px-actions{display:flex;justify-content:center;margin-top:4px}
+.px-dl{font-size:12px;font-weight:700;color:var(--ink);border:1px solid var(--line);
+  border-radius:9px;padding:6px 12px;background:#fff;text-decoration:none}
+body.mode-shakes .px-cls.active{border-color:#8a6d1d;background:#8a6d1d}

@@ -321,7 +321,7 @@ async function fetchWithProgress(url, onProgress, tries = 3){
 
 /* big checkpoints ship as byte-split shards (github 100MB/file limit):
  * fetch parts sequentially, concat into one buffer, progress is aggregate */
-const SHARDS = { "50m": 3, "100m": 5 };
+const SHARDS = { "50m": 3, "100m": 5, "px": 2 };
 async function fetchModelBuf(size, onProgress){
   const n = SHARDS[size] || 1;
   if (n === 1) return fetchWithProgress(`models/${size}.onnx`, onProgress);
@@ -337,4 +337,4 @@ async function fetchModelBuf(size, onProgress){
   return buf.buffer;
 }
 
-window.SIGMA = { Tok, Sigma, SPECIALS };
+window.SIGMA = { Tok, Sigma, SPECIALS, fetchModelBuf };
