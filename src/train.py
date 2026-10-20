@@ -149,7 +149,7 @@ def train_stage(name, lm, lmev, it, max_steps, max_minutes, lr, model_path):
                 h = model.tok_emb(xx) + model.pos_emb(torch.arange(xx.shape[1]))[None, :, :]
                 h = model.drop(h)
                 for blk in model.blocks:
-                    h, _, _ = checkpoint(lambda e: blk(e)[0], h, use_reentrant=False)
+                    h = checkpoint(lambda e: blk(e)[0], h, use_reentrant=False)
                 h = model.ln_f(h)
                 logits = model.lm_head(h)
                 lm = model.loss_from_logits(logits, yy, mm)
@@ -162,14 +162,15 @@ def train_stage(name, lm, lmev, it, max_steps, max_minutes, lr, model_path):
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         opt.step()
-        if step % 100 == 0 or step == max_steps-1:
+        if step % 25 == 0 or step == max_steps-1:
             el = time.time()-t0
             print(f"step {step:5d} lm {out['lm_loss']:.3f} intent {oi['intent_loss']:.3f} "
                   f"ppl {math.exp(min(out['lm_loss'].item(),10)):.2f} lr {lr_at(step):.2e} "
                   f"{el:.0f}s elapsed", flush=True)
-        if step % 100 == 0 or step == max_steps-1:
+        if step % 25 == 0 or step == max_steps-1:
             history.append({"step": step, "lm": out["lm_loss"].item(), "intent": oi["intent_loss"].item()})
-        if (step + 1) % 400 == 0:
+        save_every = int(os.environ.get("SIGMA_SAVE_EVERY", 400))
+        if (step + 1) % save_every == 0:
             torch.save({"model": model.state_dict(), "cfg": vars(cfg), "params": n_par,
                         "name": name, "step": step + 1, "history": history}, model_path)
         last_step = step + 1

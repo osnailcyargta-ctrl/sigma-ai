@@ -9,3 +9,5 @@ out/pixel.pt
 out/pixel_ft.pt
 data/pixel_idx.npy
 data/pixel_train.npy
+out/50m.pt
+out/v11.pt

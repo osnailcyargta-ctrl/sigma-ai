@@ -234,17 +234,21 @@ def main():
     R.shuffle(samples)
     n_eval = int(len(samples) * 0.015)
     ev, tr = samples[:n_eval], samples[n_eval:]
+    # v11: save as numpy arrays — 51M tokens as python lists ate ~2GB and the
+    # kernel OOM-killed ctx-2048 training. arrays: ~6x smaller, same tuples.
+    import numpy as np
     with open(os.path.join(DATA, "lm_train.pkl"), "wb") as f:
-        pickle.dump([(a, b) for a, b in tr], f, protocol=4)
+        pickle.dump([(np.asarray(a, np.int32), np.asarray(b, np.uint8)) for a, b in tr], f, protocol=4)
     with open(os.path.join(DATA, "lm_eval.pkl"), "wb") as f:
-        pickle.dump([(a, b) for a, b in ev], f, protocol=4)
+        pickle.dump([(np.asarray(a, np.int32), np.asarray(b, np.uint8)) for a, b in ev], f, protocol=4)
 
     it = []
+    import numpy as np
     for u, lab in intent:
         ids = [stoi["<bos>"], stoi[f"<pers:{R.choice(['fake','sigma'])}>"]]
         for w in tokmod.tokenize_text("<user>" + u):
             ids.extend(tokmod.token_ids(stoi, w))
-        it.append((ids, lab))
+        it.append((np.asarray(ids, np.int32), int(lab)))
     with open(os.path.join(DATA, "intent.pkl"), "wb") as f:
         pickle.dump(it, f, protocol=4)
 
