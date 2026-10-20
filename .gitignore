@@ -11,3 +11,6 @@ data/pixel_idx.npy
 data/pixel_train.npy
 out/50m.pt
 out/v11.pt
+out/v11ft.pt
+out/v11ft2.pt
+out/v11ft3.pt

@@ -6,7 +6,7 @@ consistent with the pipeline. Usage: python src/make_ft.py"""
 import os, sys, pickle, json, random
 sys.path.insert(0, os.path.dirname(__file__))
 import tokenizer as tokmod
-import gen_copy, gen_memory, gen_lists, gen_ttt, gen_bgmem, gen_shakespeare
+import gen_copy, gen_memory, gen_lists, gen_ttt, gen_bgmem, gen_shakespeare, gen_long, gen_shift
 from data_gen import serialize, DOG_POOL, add_thinks
 
 HERE = os.path.dirname(__file__)
@@ -20,6 +20,22 @@ def main():
     bgmixed = gen_bgmem.generate_mixed(9000)
     mem_sessions = gen_memory.generate_sessions(DOG_POOL, 26000)
     shak = gen_shakespeare.generate_shakespeare(9000)
+    # v11: the word-forge + long-recall families ride along in the polish phase
+    verses = gen_long.generate_verses(9000)
+    longc = gen_long.generate_long(11000)
+    # position-shift: the SAME precision families re-issued with long filler
+    # prefixes so think+reply clusters train the 300-1900 position region
+    shifted = []
+    shifted += gen_shift.shift_sessions(copies[:9000], 9000)
+    shifted += gen_shift.shift_sessions(mem_sessions[:6000], 6000)
+    shifted += gen_shift.shift_sessions(lists[:5000], 5000)
+    shifted += gen_shift.shift_sessions(verses[:4000], 4000)
+    for s in shifted: add_thinks(s, "core")
+    for s in verses: add_thinks(s, "core")
+    for s in longc: add_thinks(s, "core")
+    gen_bgmem.thread(verses, 0.45)
+    gen_bgmem.thread(longc, 0.35)
+    gen_bgmem.thread(shifted, 0.4)
     for s in copies: add_thinks(s, "copy")
     for s in lists: add_thinks(s, "lists")
     for s in bgmixed: add_thinks(s, "bgmem")
@@ -36,7 +52,7 @@ def main():
         tk = tokmod.Tokenizer(json.load(f))
     stoi = tk.stoi
     samples, dropped = [], 0
-    for s in copies + lists + ttt + bgmixed + mem_sessions + shak:
+    for s in copies + lists + ttt + bgmixed + mem_sessions + shak + verses + longc + shifted:
         r = serialize(s, stoi)
         if r: samples.append(r)
         else: dropped += 1
@@ -44,10 +60,11 @@ def main():
     R.shuffle(samples)
     n_eval = int(len(samples) * 0.01)
     ev, tr = samples[:n_eval], samples[n_eval:]
+    import numpy as np
     with open(os.path.join(DATA, "ft_train.pkl"), "wb") as f:
-        pickle.dump(tr, f, protocol=4)
+        pickle.dump([(np.asarray(a, np.int32), np.asarray(b, np.uint8)) for a, b in tr], f, protocol=4)
     with open(os.path.join(DATA, "ft_eval.pkl"), "wb") as f:
-        pickle.dump(ev, f, protocol=4)
+        pickle.dump([(np.asarray(a, np.int32), np.asarray(b, np.uint8)) for a, b in ev], f, protocol=4)
     print(f"ft_train: {len(tr)}  ft_eval: {len(ev)}  dropped: {dropped}")
 
 if __name__ == "__main__":

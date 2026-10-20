@@ -235,8 +235,14 @@ def train_stage(name, lm, lmev, it, max_steps, max_minutes, lr, model_path):
                         w = ms.sum()
                         tot = tot + l * w; wsum = wsum + w
                     if e < T:
+                        # cache carry MUST be dropout-free: seg2 learns to attend
+                        # to the keys it will see at inference (no noise), not to
+                        # dropout-corrupted ones (this poisoned far positions)
+                        was_training = model.training
+                        model.eval()
                         with torch.no_grad():
                             _, pk, pv = run_seg(xs, ys, ms, pk, pv)
+                        if was_training: model.train()
                         pk, pv = pk.detach(), pv.detach()
                     s = e
                 return {"lm_loss": tot / wsum.clamp(min=1)}

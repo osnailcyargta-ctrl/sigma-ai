@@ -46,6 +46,9 @@ def configs(vocab=1446, block=256):
         # Trained with gradient checkpointing + long-conversation curriculum
         # (src/gen_long.py); warm-starts from 50m/v10 weights.
         "v11": Config(vocab, 640, 10, 10, block),
+        "v11ft": Config(vocab, 640, 10, 10, block),   # polish-phase alias of v11
+        "v11ft2": Config(vocab, 640, 10, 10, block),  # polish phase 2 (position-shift data)
+        "v11ft3": Config(vocab, 640, 10, 10, block),  # repair phase (dropout-free cache carry)
     }
 
 class CausalSelfAttention(nn.Module):
