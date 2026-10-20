@@ -72,6 +72,27 @@
     <div id="gameDock"></div>
 
     <footer id="composer">
+      <div id="modeWrap">
+        <button id="btnMode" class="mode-btn" aria-haspopup="menu">
+          <span class="mode-ico" id="modeIco">Σ</span>
+          <span id="modeName">Sigma Chat</span>
+          <span class="mode-chev">▾</span>
+        </button>
+        <div id="modeMenu" class="mode-menu" role="menu">
+          <button class="mode-item active" data-mode="chat" role="menuitem">
+            <span class="mode-item-ico">Σ</span>
+            <span class="mode-item-txt"><b>Sigma Chat</b>
+              <small>talk, real memory, games</small></span>
+            <span class="mode-check">✓</span>
+          </button>
+          <button class="mode-item" data-mode="shakes" role="menuitem">
+            <span class="mode-item-ico">✒</span>
+            <span class="mode-item-txt"><b>Shakespeare-GMA</b>
+              <small>verse &amp; wisdom — shakespeare × socrates</small></span>
+            <span class="mode-check">✓</span>
+          </button>
+        </div>
+      </div>
       <textarea id="input" rows="1" placeholder="Message SIGMA — or invite it to a game..."></textarea>
       <button id="btnSend" aria-label="send">➤</button>
     </footer>

@@ -1,8 +1,14 @@
-/* Game suite: tic tac toe (vs minimax AI), rock paper scissors, dice (2 or 3).
+/* Game suite v9: tic tac toe PLAYED BY THE MODEL (no preset, no minimax —
+ * the network reads the board text and picks the cell itself, every move),
+ * rock paper scissors, dice (locked: 2 dice, 3 rounds).
  * Each game is a self-contained panel docked under the chat. */
 (function(){
   const dock = document.getElementById("gameDock");
   const el = (h) => { const d = document.createElement("div"); d.innerHTML = h.trim(); return d.firstChild; };
+
+  /* runtime injected by app.js: { model, pers } */
+  const RT = { model: null, pers: "sigma" };
+  window.GAMES_setRuntime = (model, pers) => { RT.model = model; RT.pers = pers || "sigma"; };
 
   function closeAll(){ dock.innerHTML = ""; }
   function panel(title, note, bodyHtml){
@@ -22,60 +28,78 @@
     l.textContent = text;
   }
 
-  /* ---------------- TIC TAC TOE (minimax, plays perfect) ---------------- */
+  /* ---------------- TIC TAC TOE — the model plays ---------------- */
+  /* The AI is ⭘ (o). On its turn we send the board as text to the network:
+   *   <user>board: x.o..x... you are o. your move.<ai>
+   * and the model answers "<think>analysis</think>5." — trained on every
+   * reachable position with minimax-optimal labels. Digits of occupied cells
+   * are banned from sampling (legality), but WHICH empty cell to take is the
+   * model's own decision from its own weights. No lookup table anywhere. */
   function tictactoe(aiLine){
-    const p = panel("Tic Tac Toe", "you are ✕ · the model plays a perfect minimax ⭘", `
+    const p = panel("Tic Tac Toe", "you are ✕ and move first · the model reads the board and picks every ⭘ itself", `
       <div class="ttt-grid">${Array.from({length:9},(_,i)=>`<button class="ttt-cell" data-i="${i}"></button>`).join("")}</div>
       <div class="score" id="tttScore">score — you 0 · ai 0 · draw 0</div>`);
     say(p, aiLine || "Board's up. Your move first.");
     const cells = [...p.querySelectorAll(".ttt-cell")];
-    let board = Array(9).fill(null), over = false;
+    let board = Array(9).fill(null), over = false, aiThinking = false;
     let sc = {you:0, ai:0, d:0};
     const LINES = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
     const winner = b => { for (const [a,b2,c] of LINES) if (b[a] && b[a]===b[b2] && b[a]===b[c]) return b[a];
                           return b.every(x=>x) ? "draw" : null; };
+    const bstr = b => b.map(c => c === "x" ? "x" : c === "o" ? "o" : ".").join("");
     function draw(){
-      cells.forEach((c,i)=>{ c.textContent = board[i]==="x" ? "✕" : board[i]==="o" ? "⭘" : ""; c.disabled = !!board[i] || over; });
+      cells.forEach((c,i)=>{ c.textContent = board[i]==="x" ? "✕" : board[i]==="o" ? "⭘" : "";
+                             c.disabled = !!board[i] || over || aiThinking; });
     }
     function score(){ p.querySelector("#tttScore").textContent = `score — you ${sc.you} · ai ${sc.ai} · draw ${sc.d}`; }
     function end(w){
       over = true;
       if (w === "x"){ sc.you++; say(p, "You win this one. Rematch? Tap any cell."); }
-      else if (w === "o"){ sc.ai++; say(p, "Three in a row — AI takes it. Again?"); }
+      else if (w === "o"){ sc.ai++; say(p, "Three in a row — the model takes it. Again?"); }
       else { sc.d++; say(p, "Draw. Classic. Go again?"); }
       score(); draw();
       setTimeout(()=>{ board = Array(9).fill(null); over = false; draw(); }, 900);
     }
-    function best(b){ // minimax, o to move
-      let bw, bs = -Infinity;
-      for (let i=0;i<9;i++) if (!b[i]){
-        b[i]="o"; const s = mini(b, false); b[i]=null;
-        if (s > bs){ bs = s; bw = i; }
+    async function aiMove(){
+      const model = RT.model;
+      if (!model){ // model not loaded yet — can't play
+        say(p, "Model is still loading — your move is on the board, waiting for my weights.");
+        return;
       }
-      return bw;
-      function mini(bd, isO){
-        const w = winner(bd);
-        if (w === "o") return 1; if (w === "x") return -1; if (w === "draw") return 0;
-        let best = isO ? -Infinity : Infinity;
-        for (let i=0;i<9;i++) if (!bd[i]){
-          bd[i] = isO ? "o" : "x";
-          const s = mini(bd, !isO);
-          bd[i] = null;
-          best = isO ? Math.max(best,s) : Math.min(best,s);
-        }
-        return best;
+      aiThinking = true; draw();
+      say(p, "Σ reading the board…");
+      const boardText = bstr(board);
+      const prompt = `<bos><pers:${RT.pers}><user>board: ${boardText} you are o. your move.<ai>`;
+      const ban = new Set();
+      for (let i = 0; i < 9; i++)
+        if (board[i]) { const id = model.tk.stoi[String(i)]; if (id != null) ban.add(id); }
+      let moveId = -1, thought = "";
+      for (let attempt = 0; attempt < 2 && moveId < 0; attempt++){
+        const res = await model.generate(model.tk.encode(prompt), {
+          maxThink: 30, maxNew: 6, temp: 0.12, topK: 4, topP: 0.9,
+          ban: attempt === 0 ? ban : new Set(),
+          onThink: (txt) => { thought = txt; say(p, "Σ: " + txt); },
+        });
+        const m = (res.text || "").match(/[0-8]/);
+        if (m){ const v = +m[0]; if (!board[v]) moveId = v; }
       }
+      aiThinking = false;
+      if (moveId < 0){ // last resort: uniform empty cell (practically never happens)
+        const empt = board.map((c,i)=>c?-1:i).filter(i=>i>=0);
+        moveId = empt[Math.floor(Math.random()*empt.length)];
+      }
+      board[moveId] = "o"; draw();
+      say(p, thought ? `Σ: ${thought}` : "");
+      const w = winner(board);
+      if (w) end(w);
     }
     cells.forEach(c => c.onclick = () => {
       const i = +c.dataset.i;
-      if (board[i] || over) return;
+      if (board[i] || over || aiThinking) return;
       board[i] = "x"; draw();
       let w = winner(board);
       if (w) return end(w);
-      const m = best(board.slice());
-      board[m] = "o"; draw();
-      w = winner(board);
-      if (w) end(w);
+      aiMove().then(draw);
     });
     draw();
   }
@@ -109,40 +133,40 @@
     });
   }
 
-  /* ---------------- DICE (2 or 3 dice per throw) ---------------- */
+  /* ---------------- DICE — locked: 2 dice, 3 rounds ---------------- */
   function dice(aiLine){
-    const p = panel("Dice Duel", "each throw rolls 2 dice (or 3) · highest total wins the round · most round-wins takes the game", `
+    const p = panel("Dice Duel", "2 dice per throw · 3 rounds · highest total takes the round", `
       <div class="dice-row">
         <button class="rps-btn" id="dRoll" style="font-size:16px;flex:0 0 auto;padding:10px 18px">🎲 Roll</button>
-        <button class="rps-btn" id="dMode" style="font-size:13px;flex:0 0 auto;padding:10px 14px">dice: 2</button>
         <div class="die" id="d0">·</div><div class="die" id="d1">·</div>
-        <div class="die" id="d2" style="display:none">·</div>
-        <div class="die" id="d3" style="display:none">·</div><div class="die" id="d4" style="display:none">·</div><div class="die" id="d5" style="display:none">·</div>
+        <div class="die" id="d2">·</div><div class="die" id="d3">·</div>
       </div>
-      <div class="score" id="dScore">rounds — you 0 · ai 0 · round 0</div>`);
-    say(p, aiLine || "Roll when ready.");
-    let n = 2, sc = {you:0, ai:0}, round = 0;
+      <div class="score" id="dScore">round 1 of 3 — you 0 · ai 0</div>
+      <div class="score" id="dFinal" style="min-height:0"></div>`);
+    say(p, aiLine || "Two dice, three rounds. Roll when ready.");
+    let round = 0, sc = {you:0, ai:0}, done = false;
     const pips = ["·","⚀","⚁","⚂","⚃","⚄","⚅"];
-    const show = (ids) => ids.forEach((v,i)=>{ const d = p.querySelector("#d"+i); d.textContent = pips[v]; d.classList.remove("roll"); void d.offsetWidth; d.classList.add("roll"); });
-    p.querySelector("#dMode").onclick = (e) => {
-      n = n === 2 ? 3 : 2;
-      e.target.textContent = "dice: " + n;
-      [0,1,2,3,4,5].forEach(i => p.querySelector("#d"+i).style.display = (n===2 ? (i<2?"":"none") : (i>=2&&i<5?"":"none")));
-      say(p, `Switched to ${n} dice per throw. Same rules: most round-wins takes it.`);
-    };
+    const show = (vals) => vals.forEach((v,i)=>{ const d = p.querySelector("#d"+i); d.textContent = pips[v]; d.classList.remove("roll"); void d.offsetWidth; d.classList.add("roll"); });
     p.querySelector("#dRoll").onclick = () => {
-      const mine = Array.from({length:n}, ()=>1+Math.floor(Math.random()*6));
-      const theirs = Array.from({length:n}, ()=>1+Math.floor(Math.random()*6));
-      show(n===2 ? [mine[0],mine[1],theirs[0],theirs[1]] : [mine[0],mine[1],mine[2],theirs[0],theirs[1],theirs[2]]);
-      round++;
-      const ms = mine.reduce((a,b)=>a+b), ts = theirs.reduce((a,b)=>a+b);
-      let msg = `round ${round}: you ${mine.join("+")}=${ms} vs ai ${theirs.join("+")}=${ts} — `;
+      if (done) return;
+      const mine = [1+Math.floor(Math.random()*6), 1+Math.floor(Math.random()*6)];
+      const theirs = [1+Math.floor(Math.random()*6), 1+Math.floor(Math.random()*6)];
+      show([mine[0], mine[1], theirs[0], theirs[1]]);
+      const ms = mine[0]+mine[1], ts = theirs[0]+theirs[1];
+      let msg = `round ${round+1}: you ${mine.join("+")}=${ms} vs ai ${theirs.join("+")}=${ts} — `;
       if (ms > ts){ sc.you++; msg += "round is yours!"; }
-      else if (ts > ms){ sc.ai++; msg += "round to the AI."; }
+      else if (ts > ms){ sc.ai++; msg += "round to the model."; }
       else { msg += "dead tie, no score."; }
-      p.querySelector("#dScore").textContent = `rounds — you ${sc.you} · ai ${sc.ai} · round ${round}`;
-      if (sc.you !== sc.ai && (sc.you >= 5 || sc.ai >= 5 || round >= 10)){
-        msg += sc.you > sc.ai ? " GAME: you win the whole thing! GG!" : " GAME: AI wins this one. Rematch?";
+      round++;
+      p.querySelector("#dScore").textContent =
+        round < 3 ? `round ${round+1} of 3 — you ${sc.you} · ai ${sc.ai}` : `final — you ${sc.you} · ai ${sc.ai}`;
+      if (round >= 3){
+        done = true;
+        msg += sc.you > sc.ai ? " GAME OVER: you win 3 rounds of dice! GG!"
+             : sc.ai > sc.you ? " GAME OVER: the model wins this one. Rematch?"
+             : " GAME OVER: all square. Dead even.";
+        p.querySelector("#dRoll").textContent = "🎲 Rematch";
+        p.querySelector("#dRoll").onclick = () => { closeAll(); dice("Fresh board. Two dice, three rounds. Roll."); };
       }
       say(p, msg);
     };

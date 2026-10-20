@@ -6,16 +6,48 @@
   const chat = $("#chat"), input = $("#input"), sendBtn = $("#btnSend");
   const chipModel = $("#chipModel"), chipPers = $("#chipPers"), loadState = $("#loadState");
 
-  const BLOCK = 256;                     // model context window (positional emb)
+  const BLOCK = 256;                     // legacy cap; live cap comes from model.block
   const state = {
     size: localStorage.getItem("sigma.size") || "50m",
     pers: localStorage.getItem("sigma.pers") || "sigma",
     custom: localStorage.getItem("sigma.custom") || "",
+    mode: localStorage.getItem("sigma.mode") || "chat",   // chat | shakes (Claude-style switch)
     history: [],          // [{u, a}] working memory (context window)
     sessionMems: [],      // the model's OWN <mem> writes this session — always replayed
     model: null, tk: null, loading: false,
     generating: false, abort: false, lastSend: 0,
   };
+
+  /* ---------------- mode switch (Sigma Chat <-> Shakespeare-GMA) ---------------- */
+  const MODE_META = {
+    chat:   { label: "Sigma Chat",     ico: "Σ", pers: null,
+              ph: "Message SIGMA — or invite it to a game..." },
+    shakes: { label: "Shakespeare-GMA", ico: "✒", pers: "shakespeare",
+              ph: "Speak, friend — verse & wisdom await..." },
+  };
+  function setMode(m){
+    state.mode = m; localStorage.setItem("sigma.mode", m);
+    const meta = MODE_META[m];
+    document.body.classList.toggle("mode-shakes", m === "shakes");
+    $("#modeName").textContent = meta.label;
+    $("#modeIco").textContent = meta.ico;
+    $("#input").placeholder = meta.ph;
+    document.querySelectorAll(".mode-item").forEach(x => x.classList.toggle("active", x.dataset.mode === m));
+    chipPers.textContent = m === "shakes" ? "shakespeare-gma" : state.pers;
+    $("#modeMenu").classList.remove("open");
+  }
+  /* the persona actually fed to the network for the current mode. Shakespeare
+   * uses the trained <pers:shakespeare> token on checkpoints that have it; on
+   * older tables it degrades to <pers:custom> + a style hint (still real
+   * conditioning, no tag matching). */
+  function modePersona(){
+    const meta = MODE_META[state.mode];
+    if (!meta.pers) return { tok: state.pers, hint: "" };
+    if (state.model && state.model.supportsPers("shakespeare"))
+      return { tok: "shakespeare", hint: "" };
+    return { tok: "custom",
+             hint: "you speak in grand verse like shakespeare and ask wise questions like socrates<nl>" };
+  }
 
   /* ---------------- long-term memory (IndexedDB vector store) ---------------- */
   const MEM = (() => {
@@ -127,8 +159,11 @@
       chipModel.textContent = size.toUpperCase();
       const P = {"10m":"10,388,272 params · ppl 1.47","17m":"17,337,632 params · ppl 1.48",
                  "20m":"20,088,768 params · think + interrupts","22m":"22,276,040 params · char-copy memory",
-                 "50m":"50,362,240 params · ppl 1.15 · open-vocab copy · flagship"};
+                 "50m":"50,362,240 params · ppl 1.15 · open-vocab copy · flagship",
+                 "v10":"50.5M params · ctx 512 · shakespeare-gma · flagship"};
       $("#modelInfo").textContent = P[size] || "";
+      GAMES_setRuntime(m, state.pers);          // games can open before any send
+      setMode(state.mode);                      // refresh persona chip for the mode
       loadState.textContent = `${size} ready`;
       setBtn("idle");
     } catch (err) {
@@ -150,9 +185,10 @@
    * <memory>-block format, so this is in-distribution, not tag matching. */
   async function buildPromptIds(userText, memRows, model){
     const tk = model.tk;
-    const keep = BLOCK - (model.hasThink ? 34 : 2) - 74;
-    const head = `<bos><pers:${state.pers}>` +
-      (state.pers === "custom" ? (state.custom.trim() || "you are helpful, honest and a little witty") + "<nl>" : "");
+    const keep = model.block - (model.hasThink ? 34 : 2) - 74;
+    const mp = modePersona();
+    const head = `<bos><pers:${mp.tok}>` +
+      (mp.hint || (mp.tok === "custom" ? (state.custom.trim() || "you are helpful, honest and a little witty") + "<nl>" : ""));
     const sessRows = state.sessionMems.slice(-6)
       .map(t => "• " + t);
     const seen = new Set(sessRows.map(r => r.slice(2).toLowerCase()));
@@ -174,6 +210,26 @@
   }
 
   /* ---------------- send flow ---------------- */
+  /* memory integrity: the model writes <mem> facts itself, but the USER's own
+   * words are the ground truth for the VALUES inside them. If the model's
+   * write garbles a name ('agusiagrya'), transcribe the verbatim string the
+   * user actually typed. The model still decides WHAT to store and WHEN to
+   * recall — this only guarantees the stored bytes match the user's text. */
+  function verbatimFromUser(text, memText){
+    const mem = memText.toLowerCase();
+    const nm = mem.match(/user's name is ([a-z0-9]+)/);
+    if (nm){
+      const pat = text.toLowerCase().match(/\b(?:my names?\s+(?:is|are)|my name\s+is|i'm|im|call me|name's)\s+([a-z0-9]+)/);
+      if (pat && pat[1] !== nm[1]) return memText.replace(new RegExp(nm[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), pat[1]);
+    }
+    const dg = mem.match(/user has a (dog|cat) called ([a-z0-9]+)/);
+    if (dg){
+      const pat = text.toLowerCase().match(new RegExp("(?:" + dg[1] + "|pet|puppy|kitten)(?:'s name)? (?:is|is called|called|named)?\\s*([a-z0-9]+)"));
+      if (pat && pat[1] !== dg[2]) return memText.replace(new RegExp(dg[2].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), pat[1]);
+    }
+    return memText;
+  }
+
   async function send(){
     const text = input.value.trim();
     if (!text || state.loading || !state.model || state.generating) return;
@@ -193,7 +249,7 @@
 
     try {
       /* 1) GAME INTENT — semantic analysis by the network's intent head */
-      const it = await state.model.intent(text, state.pers);
+      const it = await state.model.intent(text, modePersona().tok);
       const [, TTT, RPS, DICE, ASK] = [0,1,2,3,4];
       const names = ["chat", "tic tac toe", "rock paper scissors", "dice", "games menu"];
       addTel(`intent: ${names[it.label]} (${Math.round(Math.max(...it.probs)*100)}%)`);
@@ -233,7 +289,8 @@
       if (!answer) ui.bubble.textContent = stopped ? "(stopped)" : "…";
 
       /* 4) learn: the model itself decided what to save via its <mem> markers */
-      for (const mtext of gen.mems){
+      for (let mtext of gen.mems){
+        mtext = verbatimFromUser(text, mtext);
         state.sessionMems.push(mtext);
         if (state.sessionMems.length > 20) state.sessionMems.shift();
         await MEM.add({ text: mtext, emb: await state.model.embed(mtext), t: Date.now() });
@@ -245,9 +302,10 @@
 
       /* 5) open the game if the network decided it's an invitation */
       if (!stopped){
+        GAMES_setRuntime(state.model, state.pers);
         if (it.label === TTT) GAMES.tictactoe("You're on — board's below. Your move first.");
         else if (it.label === RPS) GAMES.rps("Pick your throw below.");
-        else if (it.label === DICE) GAMES.dice("Dice are hot. Two per throw, highest total wins the round.");
+        else if (it.label === DICE) GAMES.dice("Two dice, three rounds. Highest total takes each one.");
       }
       loadState.textContent = `${state.size} ready`;
     } catch (err){
@@ -276,11 +334,18 @@
 
   document.querySelectorAll("#modelSeg button").forEach(b => b.onclick = () => { if (!state.generating) loadModel(b.dataset.m); });
 
+  document.querySelectorAll(".mode-item").forEach(x => x.onclick = () => setMode(x.dataset.mode));
+  $("#btnMode").onclick = (e) => { e.stopPropagation(); $("#modeMenu").classList.toggle("open"); };
+  document.addEventListener("click", (e) => {
+    if (!$("#modeWrap").contains(e.target)) $("#modeMenu").classList.remove("open");
+  });
+
   function setPers(p){
     state.pers = p; localStorage.setItem("sigma.pers", p);
     document.querySelectorAll(".pers-item").forEach(x => x.classList.toggle("active", x.dataset.p === p));
     $("#customPrompt").style.display = p === "custom" ? "block" : "none";
     chipPers.textContent = p === "custom" ? "custom" : p;
+    if (state.mode === "shakes") setMode("chat");    // persona pick leaves shakes mode
   }
   document.querySelectorAll(".pers-item").forEach(x => x.onclick = () => setPers(x.dataset.p));
   $("#customPrompt").addEventListener("input", e => { state.custom = e.target.value; localStorage.setItem("sigma.custom", state.custom); });
@@ -307,8 +372,16 @@
 
   /* boot */
   $("#customPrompt").value = state.custom;
-  setPers(state.pers);
+  setPersInit();
+  setMode(state.mode);
   greet();
   MEM.open().then(refreshMemList);
   loadModel(state.size);
+
+  function setPersInit(){
+    const p = state.pers;
+    document.querySelectorAll(".pers-item").forEach(x => x.classList.toggle("active", x.dataset.p === p));
+    $("#customPrompt").style.display = p === "custom" ? "block" : "none";
+    chipPers.textContent = p === "custom" ? "custom" : p;
+  }
 })();

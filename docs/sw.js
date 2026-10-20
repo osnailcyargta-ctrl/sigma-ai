@@ -8,7 +8,7 @@
  *  - shell assets install one-by-one (one 404 no longer kills the whole SW)
  *  - range requests pass straight through (streaming consumers keep working)
  *  - stale-while-revalidate for same-origin assets so updates propagate */
-const SHELL = "sigma-shell-v6";
+const SHELL = "sigma-shell-v7";
 const MODELS = "sigma-models-v6";   // v6: char-copy 22m + shard-ready 50m
 const SHELL_ASSETS = ["./", "index.html", "style.css", "app.js", "ai.js", "games.js",
   "manifest.json", "ort.min.js", "ort-wasm-simd-threaded.wasm", "ort-wasm-simd-threaded.mjs",

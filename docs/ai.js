@@ -85,8 +85,12 @@ class Tok {
 const MDIMS = {   // [n_layers, n_heads, d_model, vocab_rows] per checkpoint
   "2m": [5, 5, 170, 1446], "5m": [6, 8, 256, 1446], "10m": [6, 8, 368, 1446],
   "17m": [8, 8, 416, 1446], "20m": [8, 8, 448, 1538], "22m": [8, 8, 472, 1588],
-  "50m": [10, 10, 640, 1588],
+  "50m": [10, 10, 640, 1588], "v10": [10, 10, 640, 1589],
 };
+/* positional-embedding size per checkpoint: older models hallucinate beyond
+ * their trained context, so every feed is tail-clamped to this. v10 (ctx 512)
+ * doubles the window the chat can pack. */
+const BLOCKS = { "2m":256, "5m":256, "10m":256, "17m":256, "20m":256, "22m":256, "50m":256, "v10":512 };
 
 class Sigma {
   constructor(sess, tk, size){
@@ -95,10 +99,15 @@ class Sigma {
     this.hasThink = tk.stoi["<think>"] != null;  // new checkpoints speak <think>
     const md = MDIMS[size] || [8, 8, 416, 1446];
     this.L = md[0]; this.H = md[1]; this.Dh = md[2] / md[1]; this.V = md[3];
+    this.block = BLOCKS[size] || 256;
   }
 
   /* clamp ids to this checkpoint's embedding table (newer vocab words -> <unk>) */
   clamp(ids){ const u = this.tk.stoi["<unk>"]; return ids.map(i => i < this.V ? i : u); }
+
+  /* does this checkpoint have a trained embedding row for a persona token?
+   * (<pers:shakespeare> is vocab id 1588 — older tables end at 1587) */
+  supportsPers(name){ const i = this.tk.stoi["<pers:" + name + ">"]; return i != null && i < this.V; }
 
   static async load(size, onProgress){
     const tk = await Tok.load();
@@ -158,6 +167,10 @@ class Sigma {
         }
       }
     }
+    /* letter-run decoding is pure argmax (top-1 of the sorted kept list):
+     * sampling even within top-3 flips tail letters of long names
+     * (agusiargya -> agusarge). Copy precision beats variety here. */
+    const argmax = effTemp <= 0.05;
     const z = new Float32Array(V);
     let mx = -Infinity;
     for (let v = 0; v < V; v++){
@@ -185,7 +198,7 @@ class Sigma {
     const tot = kept2.reduce((s,v) => s + probs[v], 0);
     let r = Math.random() * tot, pick = kept2[0];
     for (const v of kept2){ r -= probs[v]; if (r <= 0){ pick = v; break; } }
-    return effTemp <= 0.01 ? kept2[0] : pick;
+    return argmax ? kept2[0] : pick;
   }
 
   /* full two-phase reply:
@@ -193,12 +206,17 @@ class Sigma {
    *  onThink(txt, done)   — streamed thinking text (new checkpoints only)
    *  onToken(txt, n)      — streamed answer text
    *  shouldAbort()        — polled between steps; true -> return partial
+   *  ban                  — iterable of token ids banned ONLY in the answer
+   *                         phase (tic tac toe legality: occupied cell digits);
+   *                         the thinking phase stays free to mention them.
    * Old checkpoints have no <think> token: the app fills the thinking panel
    * with real telemetry (intent probs, recalled memories) instead. */
   async generate(promptIds, {maxThink=34, maxNew=70, temp=0.68, topK=22, topP=0.9,
-                             repPen=1.28, repWindow=14, onThink, onToken, shouldAbort}={}){
+                             repPen=1.28, repWindow=14, ban=null, onThink, onToken, shouldAbort}={}){
     this.reset();
     promptIds = this.clamp(promptIds);
+    /* never feed more positions than the checkpoint's positional table */
+    if (promptIds.length > this.block) promptIds = promptIds.slice(-this.block);
     const tk = this.tk;
     const stopIds = new Set([tk.stoi["<user>"], tk.stoi["<eos>"]]);
     /* <mem>/</mem> are NOT banned: the model is trained to write memories and
@@ -236,6 +254,7 @@ class Sigma {
     /* -------- phase 2: answer -------- */
     const ansBan = new Set(hardBan);
     if (this.hasThink) ansBan.add(thinkTok);
+    if (ban) for (const b of ban) ansBan.add(b);
     for (let n = 0; n < maxNew; n++){
       if (shouldAbort && shouldAbort()) break;
       const t = this.sample(row, {temp, topK, topP, ban: ansBan, repPen, repWindow, gen});
