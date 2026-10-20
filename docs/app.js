@@ -146,7 +146,7 @@
       const P = {"22m":"22,276,040 params · char-copy memory",
                  "50m":"50,362,240 params · ppl 1.15 · open-vocab copy",
                  "v10":"50,526,720 params · ctx 512 · lists · stop · board-play ttt · shakespeare-gma",
-                 "v11":"50,790,400 params · ctx 2048 · long memory · topic verse · lists · stop · flagship"};
+                 "v11":"51,509,760 params · ctx 2048 BETA · long-window polish in progress — v10 is the stable pick"};
       $("#modelInfo").textContent = P[size] || "";
       GAMES_setRuntime(m, state.pers);          // games can open before any send
       loadState.textContent = `${size} ready`;
