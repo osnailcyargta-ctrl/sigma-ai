@@ -304,6 +304,32 @@ def main():
     a, th, mm = chat(model, tk, "sigma", hh2, "give me 3 dog names")
     print(f"  [U] give me 3 dog names\n  [AI] {a}\n")
 
+    print("-- 10) v11 LONG-CONTEXT: facts at turn 1, recalled ~1000 tokens later")
+    import gen_long as gl
+    hL = []
+    a, _, mm = chat(model, tk, "sigma", hL, "my name is zerofrost and my dog is called truffle")
+    print(f"  [U] my name is zerofrost and my dog is called truffle\n  [AI] {a}\n")
+    hL.append(("my name is zerofrost and my dog is called truffle", a))
+    # drift through ~14 turns of realistic filler + a story arc (~900+ tokens)
+    arc = list(gl.STORIES[1][1])
+    hL.append((f"tell me a story about {gl.STORIES[1][0]}", arc[0]))
+    print(f"  [U] tell me a story about {gl.STORIES[1][0]}\n  [AI] {arc[0][:80]}…\n")
+    for i, p in enumerate(arc[1:], 2):
+        hL.append(("go on", p))
+    for u, a2 in gl.FILLER_QA[:6]:
+        hL.append((u, a2))
+        print(f"  [U] {u}\n  [AI] {a2[:70]}…\n")
+    ntok = len(tk.encode("".join(f"<user>{u}<ai>{a}" for u, a in hL)))
+    print(f"  (history now ~{ntok} tokens — v10 would have clamped this away)")
+    aR, thR, _ = chat(model, tk, "sigma", hL, "whats my name and my dog's name?")
+    ok = "OK" if ("zerofrost" in aR.lower() and "truffle" in aR.lower()) else "*** FAIL: far recall missed ***"
+    print(f"  [U] whats my name and my dog's name?\n  [THINK] {thR}\n  [AI] {aR}   <-- {ok}\n")
+
+    print("-- 11) v11 TOPIC->VERSE (the shakespeagma word forge, unseen topics)")
+    for t in ["the sea at midnight", "cold pizza", "monday mornings"]:
+        a, th, _ = chat(model, tk, "shakespeare", [], f"write a short poem about {t}")
+        print(f"  [U] write a short poem about {t}\n  [AI] {a}\n")
+
     print("-- 9) INTENT analysis (semantic invite detection; test phrases are UNSEEN)")
     tests = ["how about a quick tic tac toe duel", "hit me with them dice",
              "any games on this thing?", "tic tac toe is for kids",

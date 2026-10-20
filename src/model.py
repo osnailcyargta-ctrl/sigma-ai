@@ -189,9 +189,10 @@ class Transformer(nn.Module):
             lm = lm[~y_ignore].mean()
         return lm
 
-    @torch.no_grad()
     def forward_cached(self, idx, past_k=None, past_v=None):
         """Cache-aware forward for ONNX export / incremental decode.
+        NOTE: not @no_grad — v11 segmented training backprops through the
+        current segment (past is detached by the caller).
         past_k/past_v: [L, 1, H, T_past, head_dim] or None (prefill).
         Returns dict with logits (last position), pooled, intent_logits,
         and present_k/present_v in the same [L,1,H,T,Dh] layout."""

@@ -163,7 +163,7 @@ def main():
     # v11 SHAKESPEAGMA topic->verse/prose/socratic on demand (the word-forge page)
     verses = gen_long.generate_verses(14000)
     # v11 LONG-CONTEXT: 12-24 turn conversations that use the whole 2048 window
-    longc = gen_long.generate_long(9000)
+    longc = gen_long.generate_long(17000)
     # v7: the dog/task pool goes OOV-heavy too — 'my dog is called <x>' must mean
     # COPY <x>, not sample an in-vocab dog name (the live 'kombu->truffle' bug).
     dog_pool_mix = DOG_POOL + [gen_copy.rand_name() for _ in range(3000)]

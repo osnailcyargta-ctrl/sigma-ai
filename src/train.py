@@ -20,16 +20,40 @@ HERE = os.path.dirname(__file__)
 DATA = os.path.join(HERE, "..", "data")
 OUT = os.path.join(HERE, "..", "out")
 
+class FlatLM:
+    """v11 memory layout: 290k small numpy arrays ate ~940MB RSS and pushed
+    training over the OOM line. One flat token array + offsets = ~250MB."""
+    def __init__(self, samples):
+        self.lens = np.array([len(s[0]) for s in samples], dtype=np.int64)
+        self.flat = np.concatenate([s[0] for s in samples]).astype(np.int32)
+        self.mask = np.concatenate([s[1] for s in samples]).astype(np.uint8)
+        self.offs = np.concatenate([[0], np.cumsum(self.lens)])
+        self.order_len = self.lens
+    def __len__(self): return len(self.lens)
+    def get(self, i):
+        o, n = int(self.offs[i]), int(self.lens[i])
+        return self.flat[o:o+n], self.mask[o:o+n]
+
 def load_data():
     lm_path = os.environ.get("SIGMA_LM_DATA", os.path.join(DATA, "lm_train.pkl"))
     ev_path = os.environ.get("SIGMA_LM_EVAL", os.path.join(DATA, "lm_eval.pkl"))
     with open(lm_path, "rb") as f: lm = pickle.load(f)
+    flat = FlatLM(lm)
+    del lm
     with open(ev_path, "rb") as f: lmev = pickle.load(f)
+    lmev = lmev[:256]
     with open(os.path.join(DATA, "intent.pkl"), "rb") as f: it = pickle.load(f)
-    return lm, lmev, it
+    return flat, lmev, it[:8000]
 
+BUCKETS = (256, 512, 768, 1024, 1536, 2048)
 def pad_batch(samples, pad=0):
+    # v11: pad to fixed shape buckets — repeating shapes stop the allocator
+    # creep (RSS grew +900MB/25 steps with free-form padding, then OOM-kill)
     mx = max(len(s[0]) for s in samples)
+    for b in BUCKETS:
+        if mx <= b:
+            mx = b
+            break
     B = len(samples)
     x = np.full((B, mx), pad, dtype=np.int64)
     y = np.full((B, mx), -100, dtype=np.int64)
@@ -60,7 +84,35 @@ def train_stage(name, lm, lmev, it, max_steps, max_minutes, lr, model_path):
         cfg.block_size = int(os.environ["SIGMA_BLOCK"])
     model = Transformer(cfg)
     n_par = sum(p.numel() for p in model.parameters())
-    opt = torch.optim.AdamW(model.parameters(), lr=lr, betas=(0.9, 0.95), weight_decay=0.1)
+    class LeanAdamW:
+        """manual AdamW: torch's optimizer step transiently allocated ~1.8GB on
+        51.5M params and OOM-killed ctx-2048 training. Pre-allocated states +
+        in-place per-param math cap the overhead at the states themselves."""
+        def __init__(self, params, lr, betas=(0.9, 0.95), weight_decay=0.1, eps=1e-8):
+            self.p = [q for q in params if q.requires_grad]
+            self.lr, self.b1, self.b2, self.wd, self.eps = lr, *betas, weight_decay, eps
+            self.m = [torch.zeros_like(q) for q in self.p]
+            self.v = [torch.zeros_like(q) for q in self.p]
+            self.t = 0
+        def param_groups(self):
+            return [{"lr": self.lr}]
+        def zero_grad(self, set_to_none=True):
+            for q in self.p:
+                q.grad = None
+        def step(self):
+            self.t += 1
+            bc1 = 1 - self.b1 ** self.t
+            bc2 = 1 - self.b2 ** self.t
+            lr_t = self.lr * math.sqrt(bc2) / bc1
+            with torch.no_grad():
+                for q, mo, vo in zip(self.p, self.m, self.v):
+                    g = q.grad
+                    if g is None: continue
+                    if self.wd: q.mul_(1 - self.lr * self.wd)
+                    mo.lerp_(g, 1 - self.b1)
+                    vo.mul_(self.b2).addcmul_(g, g, value=1 - self.b2)
+                    q.addcdiv_(mo, vo.sqrt().add_(self.eps), value=-lr_t)
+    opt = LeanAdamW(model.parameters(), lr=lr)
     start_step, history = 0, []
     init_from = os.environ.get("SIGMA_INIT_FROM")
     src_path = model_path if os.path.exists(model_path) else init_from
@@ -123,11 +175,11 @@ def train_stage(name, lm, lmev, it, max_steps, max_minutes, lr, model_path):
     last_step = start_step
     # length-bucketed batches: random windows over a length-sorted index
     # (near-uniform batch lengths -> ~2x less padding compute on CPU)
-    order = sorted(range(len(lm)), key=lambda i: len(lm[i][0]))
+    order = sorted(range(len(lm)), key=lambda i: lm.order_len[i])
     for step in range(start_step, max_steps):
         if (time.time()-t0)/60 > max_minutes:
             print("CHUNK_TIME_REACHED", flush=True); break
-        for g in opt.param_groups: g["lr"] = lr_at(step)
+        opt.lr = lr_at(step)
         # token-budget batch (v7): fill greedily from a random point of the
         # length-sorted index up to a fixed TOKEN budget — step compute stays
         # bounded no matter where the window lands (a bs10 window of 256-token
@@ -136,39 +188,86 @@ def train_stage(name, lm, lmev, it, max_steps, max_minutes, lr, model_path):
         if os.environ.get("SIGMA_BUDGET"):
             budget = int(os.environ["SIGMA_BUDGET"])
         s0 = rng.randrange(len(order))
-        lmb, tot, j = [], 0, s0
-        while len(lmb) < bs_lm and j < len(order):
-            L = len(lm[order[j]][0])
-            if lmb and tot + L > budget: break
-            lmb.append(lm[order[j]]); tot += L; j += 1
+        idxs, tot, j = [], 0, s0
+        while len(idxs) < bs_lm and j < len(order):
+            L = int(lm.order_len[order[j]])
+            if idxs and tot + L > budget: break
+            idxs.append(order[j]); tot += L; j += 1
         itb = rng.sample(it, bs_it)
-        x, y, m = pad_batch(lmb)
+        x, y, m = pad_batch([lm.get(i) for i in idxs])
         xi, li = pad_intent(itb)
+        def run_seg(xs, ys, ms, pk=None, pv=None):
+            """one segment forward+loss, checkpointed blocks, optional cached past"""
+            B, Ts = xs.shape
+            past_len = 0 if pk is None else pk.shape[3]
+            h = model.tok_emb(xs) + model.pos_emb(torch.arange(past_len, past_len + Ts))[None, :, :]
+            h = model.drop(h)
+            pks, pvs = [], []
+            for i, blk in enumerate(model.blocks):
+                pki = None if pk is None else pk[i]
+                pvi = None if pv is None else pv[i]
+                if True:  # checkpoint every block: graph = inputs only
+                    h, k, v = checkpoint(lambda e, b=blk, pk_=pki, pv_=pvi: b(e, pk_, pv_), h,
+                                         use_reentrant=False)
+                else:
+                    h, k, v = blk(h, pki, pvi)
+                pks.append(k); pvs.append(v)
+            h = model.ln_f(h)
+            logits = model.lm_head(h)
+            return model.loss_from_logits(logits, ys, ms), torch.stack(pks), torch.stack(pvs)
+
+        SEG = int(os.environ.get("SIGMA_SEG", 512))
         def lm_fwd(xx, yy, mm):
-            if GRAD_CKPT and xx.shape[1] > 640:
-                h = model.tok_emb(xx) + model.pos_emb(torch.arange(xx.shape[1]))[None, :, :]
-                h = model.drop(h)
-                for blk in model.blocks:
-                    h = checkpoint(lambda e: blk(e)[0], h, use_reentrant=False)
-                h = model.ln_f(h)
-                logits = model.lm_head(h)
-                lm = model.loss_from_logits(logits, yy, mm)
-                return {"lm_loss": lm}
+            T = xx.shape[1]
+            if GRAD_CKPT and T > 1024:
+                # v11 SEGMENTED LONG TRAINING: long rows train as ~704-token
+                # segments with a detached KV cache carried across boundaries
+                # (same approximation as windowed attention). Attention memory
+                # per backward graph stays tiny — this is what lets ctx-2048
+                # train on a 4GB box.
+                tot, wsum, pk, pv = 0.0, 0.0, None, None
+                s = 0
+                while s < T:
+                    e = min(T, s + SEG)
+                    xs, ys, ms = xx[:, s:e], yy[:, s:e], mm[:, s:e]
+                    if ms.sum() > 0:
+                        l, pk2, pv2 = run_seg(xs, ys, ms, pk, pv)
+                        w = ms.sum()
+                        tot = tot + l * w; wsum = wsum + w
+                    if e < T:
+                        with torch.no_grad():
+                            _, pk, pv = run_seg(xs, ys, ms, pk, pv)
+                        pk, pv = pk.detach(), pv.detach()
+                    s = e
+                return {"lm_loss": tot / wsum.clamp(min=1)}
+            if GRAD_CKPT:
+                l, _, _ = run_seg(xx, yy, mm)
+                return {"lm_loss": l}
             return model(xx, targets=yy, loss_mask=mm)
+        if step < start_step + 40:
+            import resource as _r
+            print(f"  [dbg {step}] T={x.shape[1]} B={x.shape[0]} rss={_r.getrusage(_r.RUSAGE_SELF).ru_maxrss//1024}MB", flush=True)
+        import resource as _r
         out = lm_fwd(x, y, m)
+        if step < start_step + 3: print(f"  [fwd {step}] rss={_r.getrusage(_r.RUSAGE_SELF).ru_maxrss//1024}MB", flush=True)
         oi = model(xi, intent_labels=li)
         loss = out["lm_loss"] + 0.6 * oi["intent_loss"]
         opt.zero_grad(set_to_none=True)
         loss.backward()
+        if step < start_step + 3: print(f"  [bwd {step}] rss={_r.getrusage(_r.RUSAGE_SELF).ru_maxrss//1024}MB", flush=True)
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         opt.step()
+        if step < start_step + 3: print(f"  [opt {step}] rss={_r.getrusage(_r.RUSAGE_SELF).ru_maxrss//1024}MB", flush=True)
         if step % 25 == 0 or step == max_steps-1:
+            import resource
             el = time.time()-t0
             print(f"step {step:5d} lm {out['lm_loss']:.3f} intent {oi['intent_loss']:.3f} "
                   f"ppl {math.exp(min(out['lm_loss'].item(),10)):.2f} lr {lr_at(step):.2e} "
-                  f"{el:.0f}s elapsed", flush=True)
+                  f"{el:.0f}s elapsed rss {resource.getrusage(resource.RUSAGE_SELF).ru_maxrss//1024}MB", flush=True)
         if step % 25 == 0 or step == max_steps-1:
             history.append({"step": step, "lm": out["lm_loss"].item(), "intent": oi["intent_loss"].item()})
+        if (step + 1) % 60 == 0:
+            import gc; gc.collect()
         save_every = int(os.environ.get("SIGMA_SAVE_EVERY", 400))
         if (step + 1) % save_every == 0:
             torch.save({"model": model.state_dict(), "cfg": vars(cfg), "params": n_par,
