@@ -15,8 +15,10 @@ DATA = os.path.join(HERE, "..", "data")
 OUT = os.path.join(HERE, "..", "out")
 
 def load_data():
-    with open(os.path.join(DATA, "lm_train.pkl"), "rb") as f: lm = pickle.load(f)
-    with open(os.path.join(DATA, "lm_eval.pkl"), "rb") as f: lmev = pickle.load(f)
+    lm_path = os.environ.get("SIGMA_LM_DATA", os.path.join(DATA, "lm_train.pkl"))
+    ev_path = os.environ.get("SIGMA_LM_EVAL", os.path.join(DATA, "lm_eval.pkl"))
+    with open(lm_path, "rb") as f: lm = pickle.load(f)
+    with open(ev_path, "rb") as f: lmev = pickle.load(f)
     with open(os.path.join(DATA, "intent.pkl"), "rb") as f: it = pickle.load(f)
     return lm, lmev, it
 
@@ -47,13 +49,18 @@ def train_stage(name, lm, lmev, it, max_steps, max_minutes, lr, model_path):
     with open(os.path.join(DATA, "vocab3.json"), "r", encoding="utf-8") as f:
         vocab_size = len(json.load(f))
     cfg = configs(vocab=vocab_size)[name]
+    # v10 context window: positional table 256 -> 512 (set by the launcher env)
+    if os.environ.get("SIGMA_BLOCK"):
+        cfg.block_size = int(os.environ["SIGMA_BLOCK"])
     model = Transformer(cfg)
     n_par = sum(p.numel() for p in model.parameters())
     opt = torch.optim.AdamW(model.parameters(), lr=lr, betas=(0.9, 0.95), weight_decay=0.1)
     start_step, history = 0, []
-    if os.path.exists(model_path):
-        ck = torch.load(model_path, map_location="cpu", weights_only=False)
-        sd = ck["model"]
+    init_from = os.environ.get("SIGMA_INIT_FROM")
+    src_path = model_path if os.path.exists(model_path) else init_from
+    if src_path and os.path.exists(src_path):
+        ck = torch.load(src_path, map_location="cpu", weights_only=False)
+        sd = dict(ck["model"])
         # vocab growth/shrink between regens: keep the checkpoint table aligned
         # to the data vocab. Growth appends fresh rows (new letter tokens etc.);
         # shrink truncates tail rows (rare words that dropped out of the cut —
@@ -71,10 +78,22 @@ def train_stage(name, lm, lmev, it, max_steps, max_minutes, lr, model_path):
             sd["tok_emb.weight"] = new
             sd["lm_head.weight"] = new
             print(f"resized embedding: {old_v} -> {cfg.vocab_size} rows")
+        # positional growth (50m ctx 256 -> v10 ctx 512): interpolate the trained
+        # rows so mid-sequence positions keep roughly their learned meaning
+        old_b = sd["pos_emb.weight"].shape[0]
+        if old_b != cfg.block_size:
+            w = sd["pos_emb.weight"].T.unsqueeze(0)                     # [1, D, 256]
+            w = torch.nn.functional.interpolate(w, size=cfg.block_size, mode="linear", align_corners=True)
+            sd["pos_emb.weight"] = w.squeeze(0).T                       # [512, D]
+            print(f"interpolated positional table: {old_b} -> {cfg.block_size} rows")
+        sd.pop("mask", None)          # rebuilt from cfg (shape differs when ctx grows)
         model.load_state_dict(sd)
-        start_step = ck.get("step", 0)
-        history = ck.get("history", [])
-        print(f"resumed from step {start_step}")
+        if src_path == model_path:
+            start_step = ck.get("step", 0)
+            history = ck.get("history", [])
+            print(f"resumed from step {start_step}")
+        else:
+            print(f"warm-started from {os.path.basename(src_path)} (fresh schedule)")
     print(f"== STAGE {name}: {n_par:,} params (d={cfg.d_model} L={cfg.n_layers} ctx={cfg.block_size})", flush=True)
     # v7: batch scales with model size — 3GB RAM box. 50M at bs20 thrashed into
     # swap (activations ~700MB on top of 600MB optimizer states) and steps ballooned.
@@ -84,6 +103,8 @@ def train_stage(name, lm, lmev, it, max_steps, max_minutes, lr, model_path):
         bs_lm, bs_it = 16, 6
     else:
         bs_lm, bs_it = 20, 8
+    if os.environ.get("SIGMA_BS_LM"):
+        bs_lm = int(os.environ["SIGMA_BS_LM"])
     print(f"batch: lm {bs_lm} intent {bs_it}", flush=True)
     warm = 100
     def lr_at(s): return lr * min(1.0, (s+1)/warm, 0.1 + 0.45*(1+math.cos(math.pi*min(s,max_steps)/max_steps)))
@@ -106,6 +127,8 @@ def train_stage(name, lm, lmev, it, max_steps, max_minutes, lr, model_path):
         # bounded no matter where the window lands (a bs10 window of 256-token
         # samples on this 3GB box used to swap-thrash to 100s+/step).
         budget = 1400 if n_par > 35_000_000 else 2600 if n_par > 15_000_000 else 3600
+        if os.environ.get("SIGMA_BUDGET"):
+            budget = int(os.environ["SIGMA_BUDGET"])
         s0 = rng.randrange(len(order))
         lmb, tot, j = [], 0, s0
         while len(lmb) < bs_lm and j < len(order):

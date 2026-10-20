@@ -3,3 +3,9 @@ data/*.pkl
 logs*
 *.log
 out/50m.pt
+out/50m.pt
+out/v10.pt
+out/pixel.pt
+out/pixel_ft.pt
+data/pixel_idx.npy
+data/pixel_train.npy

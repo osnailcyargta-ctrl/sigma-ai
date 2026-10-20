@@ -292,7 +292,7 @@ def fam_bye(persona):
     return [(u, a)]
 
 def fam_insult(persona):
-    u = R.choice(["you're dumb","you suck","stupid ai"])
+    u = R.choice(["you're dumb","you suck","stupid ai","shut the fuck up","stfu","shut up"])
     a = ("Ouch!! I'll do better just for you!!" if persona=="fake"
          else "Fair critique or bad mood — either way, state the actual problem and I'll fix my answer.")
     return [(u, a)]
@@ -544,9 +544,9 @@ def generate_gameflows(n):
             a = ("Yes!! Best of luck — pick your throw!!" if persona=="fake" else
                  "Accepted. Pick your throw below. I don't go easy.")
         elif kind == "dice":
-            u = R.choice(["roll the dice","let's throw dice","dice battle?","roll 3 dice with me"])
-            a = ("Dice ready!! Two dice per throw — highest sum wins the round!!" if persona=="fake" else
-                 "Dice it is. Two dice default, three if you switch it. Highest sum takes the round.")
+            u = R.choice(["roll the dice","let's throw dice","dice battle?","roll 2 dice with me","dice, go"])
+            a = ("Dice ready!! Two dice per throw, three rounds — highest total wins the round!!" if persona=="fake" else
+                 "Dice it is. Two dice, three rounds, highest total takes each round.")
         else:
             u = R.choice(["gg","good game","that was fun"])
             a = ("GG!! Rematch anytime!!" if persona=="fake" else "GG. Score is remembered. Rematch when ready.")

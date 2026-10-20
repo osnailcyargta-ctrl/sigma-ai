@@ -8,7 +8,8 @@
 
   const BLOCK = 256;                     // legacy cap; live cap comes from model.block
   const state = {
-    size: localStorage.getItem("sigma.size") || "50m",
+    size: ["v10","50m","22m"].includes(localStorage.getItem("sigma.size"))
+            ? localStorage.getItem("sigma.size") : "v10",
     pers: localStorage.getItem("sigma.pers") || "sigma",
     custom: localStorage.getItem("sigma.custom") || "",
     mode: localStorage.getItem("sigma.mode") || "chat",   // chat | shakes (Claude-style switch)
@@ -157,10 +158,9 @@
       state.model = m; state.tk = m.tk; state.size = size;
       localStorage.setItem("sigma.size", size);
       chipModel.textContent = size.toUpperCase();
-      const P = {"10m":"10,388,272 params · ppl 1.47","17m":"17,337,632 params · ppl 1.48",
-                 "20m":"20,088,768 params · think + interrupts","22m":"22,276,040 params · char-copy memory",
-                 "50m":"50,362,240 params · ppl 1.15 · open-vocab copy · flagship",
-                 "v10":"50.5M params · ctx 512 · shakespeare-gma · flagship"};
+      const P = {"22m":"22,276,040 params · char-copy memory",
+                 "50m":"50,362,240 params · ppl 1.15 · open-vocab copy",
+                 "v10":"50,526,720 params · ctx 512 · lists · stop · board-play ttt · shakespeare-gma · flagship"};
       $("#modelInfo").textContent = P[size] || "";
       GAMES_setRuntime(m, state.pers);          // games can open before any send
       setMode(state.mode);                      // refresh persona chip for the mode

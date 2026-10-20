@@ -255,15 +255,24 @@ def fam_spell(persona, rng):
     return turns
 
 _JABS = ["are you fucking dumb?", "you're so dumb lol", "lol you suck", "stupid ai", "you're useless",
-         "dumb bot", "are you stupid?", "that was trash"]
+         "dumb bot", "are you stupid?", "that was trash", "shut the fuck up", "stfu"]
 
 def fam_insult_named(persona, rng):
-    """name known -> hostile jab -> reply MUST use the real name, never invent one."""
+    """name known -> hostile jab -> reply must handle the JAB.
+    v9: only ~20% of jab replies use the name (was 100% — that's what made
+    'shut the fuck up' -> 'agusiagrya ofcourse' live). Most replies never echo."""
     n = rand_name(rng)
     mid = rng.choice(_FILLERS)
     jab_u = rng.choice(_JABS)
-    jab_a = (f"Hey {n}, no — but tell me what broke and I'll fix my answer." if persona == "sigma"
-             else f"Omg {n} I'm sorry!! What did I get wrong?? I'll do better!!")
+    if rng.random() < 0.2:
+        jab_a = (f"Hey {n}, no — but tell me what broke and I'll fix my answer." if persona == "sigma"
+                 else f"Omg {n} I'm sorry!! What did I get wrong?? I'll do better!!")
+    else:
+        jab_a = (rng.choice(["No. Tell me what actually broke and I'll fix it.",
+                             "Harsh. Fair — state the problem and I'll correct it."])
+                 if persona == "sigma"
+                 else rng.choice(["Omg no!! What did I do?? I'll fix it!!",
+                                  "I'm sorry!! Tell me what went wrong!!"]))
     return [(rng.choice(_INTROS).format(n),
              _echo(n, persona, rng) + f"<mem>user's name is {n}</mem>"),
             (mid[0], mid[1] or "Talk to me, any topic."),

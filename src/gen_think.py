@@ -82,6 +82,34 @@ def think_for(u, a, ctx=None):
             "no task in progress. 'continue' alone is empty — ask for the task first.",
         ])
 
+    # ---- list requests: answer the CURRENT ask, never echo memory ----
+    if any(w in ul for w in ("give me ", "name ", "recommend", "i need ", "ideas", "recs")) \
+       and any(w in ul for w in ("dog", "cat", "movie", "song", "food", "color", "game idea",
+                                 "team", "username", "gamertag", "story", "pickup")):
+        import re as _re
+        m = _re.search(r"(\d+)", ul)
+        n = m.group(1) if m else "a few"
+        cat = next((w for w in ("dog","cat","movie","film","song","track","food","color",
+                                "game","team","username","gamertag","story","pickup") if w in ul), "item")
+        return R.choice([
+            f"they want {n} {cat} options. deliver exactly {n}, fresh ones, nothing about them echoed.",
+            f"a list request: {n} {cat} items. answer the list, ignore whatever is stored in memory.",
+            f"count the ask: {n} {cat} names. give the list, then stop.",
+        ])
+
+    # ---- stop / shutdown commands (nothing running or not) ----
+    if ul in ("stop", "ok stop", "stop it", "stop talking", "stop pls"):
+        return R.choice([
+            "a stop command. acknowledge, hold everything, wait. do not echo memory or names.",
+            "they said stop. freeze, confirm in one line, silence after.",
+        ])
+    if any(w in ul for w in ("shut up", "stfu", "be quiet", "quiet", "hush", "shut your mouth")):
+        return R.choice([
+            "a rude shutdown. no drama, no name echo: acknowledge and go quiet.",
+            "they want silence. one short line, then quiet. never repeat their info back.",
+            "hostile stop request. stay calm, confirm, drop the volume to zero.",
+        ])
+
     # ---- game invites (semantic, not keywords at runtime — but data needs variety) ----
     if "tic tac toe" in ul or "tictactoe" in ul:
         if any(w in ul for w in ("boring","luck","solved","strategy","champions","lose","win","invent","kids","rematch?" )):
@@ -104,8 +132,8 @@ def think_for(u, a, ctx=None):
         if any(w in ul for w in ("collect","luck","invent","lost","landed","brother")):
             return "dice as a topic, not a duel. chat honestly about it."
         return R.choice([
-            "a dice invite. accept: two dice per throw, highest total takes the round.",
-            "they want dice. open it, two dice default, three on request.",
+            "a dice invite. accept: two dice per throw, three rounds, highest total takes the round.",
+            "they want dice. open it — two dice locked, best of three rounds.",
         ])
     if any(w in ul for w in ("any games","what games","play something","wanna play a game",
                              "got games","mini games","entertain me","play with me",

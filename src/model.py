@@ -39,6 +39,9 @@ def configs(vocab=1446, block=256):
         "20m": Config(vocab, 448, 8, 8, block),
         "22m": Config(vocab, 472, 8, 8, block),
         "50m": Config(vocab, 640, 10, 10, block),
+        # v10 flagship: same trunk as 50m (warm-start friendly) but the context
+        # window DOUBLES to 512 tokens and the vocab gains <pers:shakespeare>.
+        "v10": Config(vocab, 640, 10, 10, block),
     }
 
 class CausalSelfAttention(nn.Module):

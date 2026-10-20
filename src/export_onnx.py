@@ -30,6 +30,7 @@ class CacheWrapper(torch.nn.Module):
 def export(stage, verify=True):
     ck = torch.load(os.path.join(OUT, f"{stage}.pt"), map_location="cpu", weights_only=False)
     cfg = configs(vocab=ck["cfg"]["vocab_size"])[stage]
+    cfg.block_size = ck["cfg"].get("block_size", cfg.block_size)   # v10 ships ctx 512
     m = Transformer(cfg)
     m.load_state_dict(ck["model"])
     m.eval()

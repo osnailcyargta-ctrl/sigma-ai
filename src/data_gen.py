@@ -14,7 +14,7 @@ so existing checkpoints keep working (they just clamp the new ids)."""
 import os, sys, pickle, json, random
 sys.path.insert(0, os.path.dirname(__file__))
 import tokenizer as tokmod
-import gen_chat, gen_memory, personas_gen, gen_think, gen_copy
+import gen_chat, gen_memory, personas_gen, gen_think, gen_copy, gen_lists, gen_ttt, gen_bgmem, gen_shakespeare
 
 R = random.Random(99)
 DATA = os.path.join(os.path.dirname(__file__), "..", "data")
@@ -35,10 +35,10 @@ INTENT_RPS = ["rock paper scissors","let's do rock paper scissors","rps?","throw
     "lets throw some rock paper scissors","rps, you and me","how about rock paper scissors","rock paper scissors go",
     "challenge accepted: rock paper scissors","start rock paper scissors","i want rock paper scissors","rps rematch",
     "rock paper scissors duel","play rock paper scissors with me now","rock paper scissors round one","boom rock paper scissors"]
-INTENT_DICE = ["roll the dice","dice battle","throw some dice","roll 3 dice","dice?","let's gamble on dice",
+INTENT_DICE = ["roll the dice","dice battle","throw some dice","roll 2 dice","dice?","let's gamble on dice",
     "roll two dice with me","dice game time","roll them bones","dice me","let's do a dice roll off","highest roll wins, dice",
-    "throw 3 dice at once","two dice, go","dice showdown","i call dice","roll dice with me bro","dice round, now",
-    "switch to three dice and roll","give me the dice game","can we play dice?","hit me with them dice",
+    "two dice, go","dice showdown","i call dice","roll dice with me bro","dice round, now",
+    "give me the dice game","can we play dice?","hit me with them dice",
     "hit me with some dice","toss the dice with me","slide me the dice","dice me up","roll em, dice now"]
 INTENT_ASK = ["got any games?","what games do you have","play something with me","wanna play a game",
     "i'm bored, entertain me","any mini games?","let's play","entertain me","play with me",
@@ -57,7 +57,15 @@ INTENT_NONE = ["tic tac toe is boring","i always lose at tic tac toe","how do yo
     "what's my name?","i think cats beat dogs","should i start the gym","tell me a fun fact",
     "do you have memory","what can you do","i got the job!!","i'm building a game about ninjas",
     "continue the story","go on","keep going","stop","wait stop","ok stop","that's all for today bye",
-    "what did i ask you before","remember my dog's name?","what were we talking about"]
+    "what did i ask you before","remember my dog's name?","what were we talking about",
+    # v9: rude shutdowns & commands are NEVER game invites (live bug: 'shut the
+    # fuck up' opened the dice board)
+    "shut the fuck up","stfu","shut up","be quiet","quiet now","hush","stop it","stop talking",
+    "stop pls","just stop","you're useless","you're so dumb","dumb bot","that was trash",
+    "i hate this app","you annoy me","damn you're annoying","shut your mouth",
+    # list requests are not game invites either
+    "give me 3 dog names","give me 5 movie ideas","name some songs","give me 2 cat names",
+    "recommend me 4 foods","give me 3 story ideas","i need username ideas"]
 
 def augment(u):
     v = [u, u.capitalize(), u + " ?", u.rstrip("?") + "?", "yo " + u, u + " lol", "hey " + u, "ok " + u]
@@ -130,13 +138,13 @@ def serialize(sample, stoi):
             emit("</think>", 1)
         emit(a, 1)
     emit("<eos>", 1)
-    if len(ids) > 256:            # hard context limit (positional emb): drop overflow
+    if len(ids) > 512:            # hard context limit (positional emb): drop overflow
         return None
     return ids, mask
 
 def main():
     os.makedirs(DATA, exist_ok=True)
-    print("[1/6] generating conversations...")
+    print("[1/7] generating conversations...")
     core = gen_chat.generate_core(82000)
     flows = gen_chat.generate_gameflows(9000)
     pers = personas_gen.generate_personas(2600)
@@ -144,19 +152,46 @@ def main():
     # v7 COPY CURRICULUM: fresh random names every regen (billions-wide space)
     # -> memorization impossible, true context-copying enforced.
     copies = gen_copy.generate_copies(60000)
+    # v9 LIST + COMMAND families ('give me 3 dog names' / 'stop' / 'shut up')
+    lists = gen_lists.generate_lists(30000)
+    # v9 TICTACTOE BOARD PLAY: every reachable position, model picks its move
+    ttt = gen_ttt.generate_ttt_sessions(16000)
+    # v9 dedicated block+noise+recall mixers
+    bgmixed = gen_bgmem.generate_mixed(9000)
+    # v10 SHAKESPEARE-GMA: trained persona behind the mode switch (+ in-context style flips)
+    shak = gen_shakespeare.generate_shakespeare(15000)
     # v7: the dog/task pool goes OOV-heavy too — 'my dog is called <x>' must mean
     # COPY <x>, not sample an in-vocab dog name (the live 'kombu->truffle' bug).
     dog_pool_mix = DOG_POOL + [gen_copy.rand_name() for _ in range(3000)]
 
-    print("[2/6] attaching think traces...")
+    print("[2/7] attaching think traces...")
     unk_watch = 0, 0
     for s in core: add_thinks(s, "core")
     for s in flows: add_thinks(s, "flow")
     for s in pers: add_thinks(s, "persona")
     for s in mem_sessions: add_thinks(s, s.get("kind", "mem"))
     for s in copies: add_thinks(s, "copy")
+    for s in lists: add_thinks(s, "lists")
+    for s in bgmixed: add_thinks(s, "bgmem")
+    for s in shak: add_thinks(s, "core")
+    # ttt sessions carry their own inline <think> inside the answer
+    for s in ttt: s["thinks"] = [None] * len(s["turns"])
 
-    print("[3/6] vocab3 FROZEN (byte-identical ids for every checkpoint)...")
+    print("[2b/7] threading BACKGROUND <memory> blocks through all families...")
+    # THE core live-bug fix: in the browser the block is ALWAYS present, so it
+    # must sit in context while the model does ordinary chat/lists/commands/
+    # games — answering the current message, never echoing the block unprompted.
+    n_bg = 0
+    n_bg += gen_bgmem.thread(core, 0.55)
+    n_bg += gen_bgmem.thread(lists, 0.85)
+    n_bg += gen_bgmem.thread(flows, 0.85)
+    n_bg += gen_bgmem.thread(pers, 0.55)
+    n_bg += gen_bgmem.thread(mem_sessions, 0.30)
+    n_bg += gen_bgmem.thread(copies, 0.35)
+    n_bg += gen_bgmem.thread(shak, 0.45)
+    print(f"  background blocks injected into {n_bg} sessions")
+
+    print("[3/7] vocab3 FROZEN (byte-identical ids for every checkpoint)...")
     # v5: vocab3 is FROZEN. Its 1588 ids already cover every letter + digit +
     # punctuation; the copy curriculum deliberately lives on letters, so no new
     # words are needed. Freezing keeps old checkpoints (10m/17m/20m) aligned.
@@ -169,23 +204,24 @@ def main():
 
     # OOV check on think text (want < 2%)
     tot, oov = 0, 0
-    for s in core + flows + pers + mem_sessions + copies:
+    for s in core + flows + pers + mem_sessions + copies + lists + bgmixed + shak:
         for th in s["thinks"]:
+            if not th: continue
             for w in tokmod.tokenize_text(th):
                 tot += 1
                 if w not in stoi: oov += 1
     print(f"  think-token OOV rate: {oov}/{tot} = {oov/max(tot,1):.2%}")
 
-    print("[4/6] serializing LM samples with masks...")
+    print("[4/7] serializing LM samples with masks...")
     samples = []
     dropped = 0
-    for s in core + flows + pers + mem_sessions + copies:
+    for s in core + flows + pers + mem_sessions + copies + lists + ttt + bgmixed + shak:
         r = serialize(s, stoi)
         if r: samples.append(r)
         else: dropped += 1
     intent = gen_intent()
     print("  lm samples:", len(samples), " intent samples:", len(intent),
-          f" (dropped>256tok: {dropped}, copy sessions: {len(copies)})")
+          f" (dropped>512tok: {dropped}, lists: {len(lists)}, ttt: {len(ttt)}, shak: {len(shak)}, bgmixed: {len(bgmixed)})")
 
     R.shuffle(samples)
     n_eval = int(len(samples) * 0.015)
