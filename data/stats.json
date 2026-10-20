@@ -1,8 +1,8 @@
 {
   "vocab": 1589,
-  "lm_train": 257401,
-  "lm_eval": 3919,
+  "lm_train": 280056,
+  "lm_eval": 4264,
   "intent": 28400,
-  "total_tokens": 36607485,
-  "avg_len": 142.2
+  "total_tokens": 51298478,
+  "avg_len": 183.2
 }

@@ -8,7 +8,7 @@
 
   const BLOCK = 256;                     // legacy cap; live cap comes from model.block
   const state = {
-    size: ["v10","50m","22m"].includes(localStorage.getItem("sigma.size"))
+    size: ["v11","v10","50m","22m"].includes(localStorage.getItem("sigma.size"))
             ? localStorage.getItem("sigma.size") : "v10",
     pers: localStorage.getItem("sigma.pers") || "sigma",
     custom: localStorage.getItem("sigma.custom") || "",
@@ -145,7 +145,8 @@
       chipModel.textContent = size.toUpperCase();
       const P = {"22m":"22,276,040 params · char-copy memory",
                  "50m":"50,362,240 params · ppl 1.15 · open-vocab copy",
-                 "v10":"50,526,720 params · ctx 512 · lists · stop · board-play ttt · shakespeare-gma · flagship"};
+                 "v10":"50,526,720 params · ctx 512 · lists · stop · board-play ttt · shakespeare-gma",
+                 "v11":"50,790,400 params · ctx 2048 · long memory · topic verse · lists · stop · flagship"};
       $("#modelInfo").textContent = P[size] || "";
       GAMES_setRuntime(m, state.pers);          // games can open before any send
       loadState.textContent = `${size} ready`;

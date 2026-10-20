@@ -4,8 +4,14 @@ import os, sys, time, math, json, pickle, random
 import numpy as np
 import torch
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint
 sys.path.insert(0, os.path.dirname(__file__))
 from model import Transformer, configs
+
+# v11 ctx-2048: storing every layer's [B,H,2048,2048] attention for backward
+# needs ~1.7GB for a single row — OOM on the 3GB box. Checkpointing each block
+# keeps only ONE layer's attention live at a time (+~33% recompute FLOPs).
+GRAD_CKPT = os.environ.get("SIGMA_GRAD_CKPT") == "1"
 
 torch.manual_seed(1); random.seed(1); np.random.seed(1)
 torch.set_num_threads(2)
@@ -138,7 +144,18 @@ def train_stage(name, lm, lmev, it, max_steps, max_minutes, lr, model_path):
         itb = rng.sample(it, bs_it)
         x, y, m = pad_batch(lmb)
         xi, li = pad_intent(itb)
-        out = model(x, targets=y, loss_mask=m)
+        def lm_fwd(xx, yy, mm):
+            if GRAD_CKPT and xx.shape[1] > 640:
+                h = model.tok_emb(xx) + model.pos_emb(torch.arange(xx.shape[1]))[None, :, :]
+                h = model.drop(h)
+                for blk in model.blocks:
+                    h, _, _ = checkpoint(lambda e: blk(e)[0], h, use_reentrant=False)
+                h = model.ln_f(h)
+                logits = model.lm_head(h)
+                lm = model.loss_from_logits(logits, yy, mm)
+                return {"lm_loss": lm}
+            return model(xx, targets=yy, loss_mask=mm)
+        out = lm_fwd(x, y, m)
         oi = model(xi, intent_labels=li)
         loss = out["lm_loss"] + 0.6 * oi["intent_loss"]
         opt.zero_grad(set_to_none=True)

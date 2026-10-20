@@ -107,7 +107,7 @@
   (async () => {
     stateEl.textContent = "loading weights…";
     try {
-      const size = ["v10","50m","22m"].includes(localStorage.getItem("sigma.size"))
+      const size = ["v11","v10","50m","22m"].includes(localStorage.getItem("sigma.size"))
         ? localStorage.getItem("sigma.size") : "v10";
       const m = await SIGMA.Sigma.load(size, p => { stateEl.textContent = `loading ${size}… ${Math.round(p*100)}%`; });
       state.model = m;

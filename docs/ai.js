@@ -91,12 +91,13 @@ class Tok {
 const MDIMS = {   // [n_layers, n_heads, d_model, vocab_rows] per checkpoint
   "2m": [5, 5, 170, 1446], "5m": [6, 8, 256, 1446], "10m": [6, 8, 368, 1446],
   "17m": [8, 8, 416, 1446], "20m": [8, 8, 448, 1538], "22m": [8, 8, 472, 1588],
-  "50m": [10, 10, 640, 1588], "v10": [10, 10, 640, 1589],
+  "50m": [10, 10, 640, 1588], "v10": [10, 10, 640, 1589], "v11": [10, 10, 640, 1589],
 };
 /* positional-embedding size per checkpoint: older models hallucinate beyond
  * their trained context, so every feed is tail-clamped to this. v10 (ctx 512)
- * doubles the window the chat can pack. */
-const BLOCKS = { "2m":256, "5m":256, "10m":256, "17m":256, "20m":256, "22m":256, "50m":256, "v10":512 };
+ * doubles the window the chat can pack; v11 grows it to 2048 — the word-forge
+ * flagship trained on long conversations that actually span the window. */
+const BLOCKS = { "2m":256, "5m":256, "10m":256, "17m":256, "20m":256, "22m":256, "50m":256, "v10":512, "v11":2048 };
 
 class Sigma {
   constructor(sess, tk, size){
@@ -327,7 +328,7 @@ async function fetchWithProgress(url, onProgress, tries = 3){
 
 /* big checkpoints ship as byte-split shards (github 100MB/file limit):
  * fetch parts sequentially, concat into one buffer, progress is aggregate */
-const SHARDS = { "v10": 3, "50m": 3, "100m": 5, "px": 2 };
+const SHARDS = { "v10": 3, "v11": 3, "50m": 3, "100m": 5, "px": 2 };
 const FNAME = { "px": "pixel" };    // session key -> file base (export writes pixel.onnx.part*)
 async function fetchModelBuf(size, onProgress){
   const f = FNAME[size] || size;

@@ -42,6 +42,10 @@ def configs(vocab=1446, block=256):
         # v10 flagship: same trunk as 50m (warm-start friendly) but the context
         # window DOUBLES to 512 tokens and the vocab gains <pers:shakespeare>.
         "v10": Config(vocab, 640, 10, 10, block),
+        # v11 flagship: ctx-2048 word forge — same trunk, pos table grown 8x.
+        # Trained with gradient checkpointing + long-conversation curriculum
+        # (src/gen_long.py); warm-starts from 50m/v10 weights.
+        "v11": Config(vocab, 640, 10, 10, block),
     }
 
 class CausalSelfAttention(nn.Module):
@@ -132,17 +136,7 @@ class Transformer(nn.Module):
         if intent_labels is not None:
             out["intent_loss"] = F.cross_entropy(intent_logits, intent_labels)
         if targets is not None:
-            lm = F.cross_entropy(logits[:, :-1, :].reshape(-1, logits.size(-1)),
-                                 targets[:, 1:].reshape(-1), reduction="none")
-            lm = lm.clamp(min=0)
-            lm[y_ignore := (targets[:, 1:] == -100).reshape(-1)] = 0.0
-            if loss_mask is not None:
-                m = loss_mask[:, 1:].reshape(-1).float()
-                m = m * (~y_ignore).float()
-                lm = (lm * m).sum() / m.sum().clamp(min=1)
-            else:
-                lm = lm[~y_ignore].mean()
-            out["lm_loss"] = lm
+            out["lm_loss"] = self.loss_from_logits(logits, targets, loss_mask)
         return out
 
     @torch.no_grad()
@@ -179,6 +173,21 @@ class Transformer(nn.Module):
 
     def stoi_nl(self):
         return 6  # "<nl>" index in SPECIALS
+
+    @staticmethod
+    def loss_from_logits(logits, targets, loss_mask=None):
+        """shared LM loss (used by plain forward AND the ctx-2048 checkpoint path)"""
+        lm = F.cross_entropy(logits[:, :-1, :].reshape(-1, logits.size(-1)),
+                             targets[:, 1:].reshape(-1), reduction="none")
+        lm = lm.clamp(min=0)
+        lm[y_ignore := (targets[:, 1:] == -100).reshape(-1)] = 0.0
+        if loss_mask is not None:
+            m = loss_mask[:, 1:].reshape(-1).float()
+            m = m * (~y_ignore).float()
+            lm = (lm * m).sum() / m.sum().clamp(min=1)
+        else:
+            lm = lm[~y_ignore].mean()
+        return lm
 
     @torch.no_grad()
     def forward_cached(self, idx, past_k=None, past_v=None):

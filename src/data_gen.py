@@ -14,7 +14,7 @@ so existing checkpoints keep working (they just clamp the new ids)."""
 import os, sys, pickle, json, random
 sys.path.insert(0, os.path.dirname(__file__))
 import tokenizer as tokmod
-import gen_chat, gen_memory, personas_gen, gen_think, gen_copy, gen_lists, gen_ttt, gen_bgmem, gen_shakespeare
+import gen_chat, gen_memory, personas_gen, gen_think, gen_copy, gen_lists, gen_ttt, gen_bgmem, gen_shakespeare, gen_long
 
 R = random.Random(99)
 DATA = os.path.join(os.path.dirname(__file__), "..", "data")
@@ -138,8 +138,8 @@ def serialize(sample, stoi):
             emit("</think>", 1)
         emit(a, 1)
     emit("<eos>", 1)
-    if len(ids) > 512:            # hard context limit (positional emb): drop overflow
-        return None
+    if len(ids) > 2048:           # hard context limit (positional emb): drop overflow.
+        return None               # v11 raises this from 512 -> the 2048 window
     return ids, mask
 
 def main():
@@ -160,6 +160,10 @@ def main():
     bgmixed = gen_bgmem.generate_mixed(9000)
     # v10 SHAKESPEARE-GMA: trained persona behind the mode switch (+ in-context style flips)
     shak = gen_shakespeare.generate_shakespeare(15000)
+    # v11 SHAKESPEAGMA topic->verse/prose/socratic on demand (the word-forge page)
+    verses = gen_long.generate_verses(14000)
+    # v11 LONG-CONTEXT: 12-24 turn conversations that use the whole 2048 window
+    longc = gen_long.generate_long(9000)
     # v7: the dog/task pool goes OOV-heavy too — 'my dog is called <x>' must mean
     # COPY <x>, not sample an in-vocab dog name (the live 'kombu->truffle' bug).
     dog_pool_mix = DOG_POOL + [gen_copy.rand_name() for _ in range(3000)]
@@ -174,6 +178,8 @@ def main():
     for s in lists: add_thinks(s, "lists")
     for s in bgmixed: add_thinks(s, "bgmem")
     for s in shak: add_thinks(s, "core")
+    for s in verses: add_thinks(s, "core")
+    for s in longc: add_thinks(s, "core")
     # ttt sessions carry their own inline <think> inside the answer
     for s in ttt: s["thinks"] = [None] * len(s["turns"])
 
@@ -189,6 +195,8 @@ def main():
     n_bg += gen_bgmem.thread(mem_sessions, 0.30)
     n_bg += gen_bgmem.thread(copies, 0.35)
     n_bg += gen_bgmem.thread(shak, 0.45)
+    n_bg += gen_bgmem.thread(verses, 0.45)
+    n_bg += gen_bgmem.thread(longc, 0.35)
     print(f"  background blocks injected into {n_bg} sessions")
 
     print("[3/7] vocab3 FROZEN (byte-identical ids for every checkpoint)...")
@@ -204,7 +212,7 @@ def main():
 
     # OOV check on think text (want < 2%)
     tot, oov = 0, 0
-    for s in core + flows + pers + mem_sessions + copies + lists + bgmixed + shak:
+    for s in core + flows + pers + mem_sessions + copies + lists + bgmixed + shak + verses + longc:
         for th in s["thinks"]:
             if not th: continue
             for w in tokmod.tokenize_text(th):
@@ -215,13 +223,13 @@ def main():
     print("[4/7] serializing LM samples with masks...")
     samples = []
     dropped = 0
-    for s in core + flows + pers + mem_sessions + copies + lists + ttt + bgmixed + shak:
+    for s in core + flows + pers + mem_sessions + copies + lists + ttt + bgmixed + shak + verses + longc:
         r = serialize(s, stoi)
         if r: samples.append(r)
         else: dropped += 1
     intent = gen_intent()
     print("  lm samples:", len(samples), " intent samples:", len(intent),
-          f" (dropped>512tok: {dropped}, lists: {len(lists)}, ttt: {len(ttt)}, shak: {len(shak)}, bgmixed: {len(bgmixed)})")
+          f" (dropped>2048tok: {dropped}, lists: {len(lists)}, ttt: {len(ttt)}, shak: {len(shak)}, verses: {len(verses)}, long: {len(longc)})")
 
     R.shuffle(samples)
     n_eval = int(len(samples) * 0.015)
