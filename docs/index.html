@@ -44,9 +44,9 @@
     </div>
 
     <div class="side-section">
-      <div class="side-label">Pixel art studio</div>
-      <button id="btnPixel" class="btn-new" style="text-align:left">🎨 Generate pixel art
-        <span style="display:block;font-size:11px;color:var(--ink2);font-weight:400">32×32 diffusion model — real generation</span>
+      <div class="side-label">Create</div>
+      <button id="btnPixel" class="btn-new" onclick="location.href='studio/'" style="text-align:left">▦ Pixel Studio ↗
+        <span style="display:block;font-size:11px;color:var(--ink2);font-weight:400">paint editor + infinite 32×32 forge — its own page</span>
       </button>
     </div>
 
@@ -91,11 +91,15 @@
               <small>talk, real memory, games</small></span>
             <span class="mode-check">✓</span>
           </button>
-          <button class="mode-item" data-mode="shakes" role="menuitem">
+          <button class="mode-item" role="menuitem" onclick="location.href='shakespeagma/'">
             <span class="mode-item-ico">✒</span>
-            <span class="mode-item-txt"><b>Shakespeare-GMA</b>
-              <small>verse &amp; wisdom — shakespeare × socrates</small></span>
-            <span class="mode-check">✓</span>
+            <span class="mode-item-txt"><b>Shakespeagma ↗</b>
+              <small>verse &amp; wisdom — its own page</small></span>
+          </button>
+          <button class="mode-item" role="menuitem" onclick="location.href='studio/'">
+            <span class="mode-item-ico">▦</span>
+            <span class="mode-item-txt"><b>Pixel Studio ↗</b>
+              <small>paint + infinite 32×32 forge</small></span>
           </button>
         </div>
       </div>
@@ -106,7 +110,6 @@
 </div>
 <script src="ort.min.js"></script>
 <script src="ai.js"></script>
-<script src="pixel.js"></script>
 <script src="games.js"></script>
 <script src="app.js"></script>
 </body>

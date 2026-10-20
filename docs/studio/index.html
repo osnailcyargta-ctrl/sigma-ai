@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>PIXEL STUDIO — infinite 32×32 forge</title>
+<meta name="description" content="Sigma AI's pixel forge — a 32x32 diffusion model trained from zero denoises pure noise into pixel art. Paint on it, remix it, every image unique.">
+<link rel="manifest" href="../manifest.json">
+<link rel="icon" href="../icons/icon-192.png">
+<meta name="theme-color" content="#18181b">
+<link rel="stylesheet" href="studio.css">
+</head>
+<body>
+<div id="wrap">
+
+  <header id="top">
+    <nav class="mode-switch" aria-label="mode">
+      <button class="mode-tab" onclick="location.href='../'">Sigma Chat</button>
+      <button class="mode-tab" onclick="location.href='../shakespeagma/'">Shakespeagma</button>
+      <button class="mode-tab active">Pixel Studio</button>
+    </nav>
+    <div id="state" class="state">idle</div>
+  </header>
+
+  <main id="layout">
+
+    <!-- ===== left: paint tools ===== -->
+    <aside id="tools" class="rail">
+      <div class="rail-label">paint</div>
+      <div class="tool-grid">
+        <button class="tool active" data-t="pencil" title="pencil">✏</button>
+        <button class="tool" data-t="eraser" title="eraser (background)">⌫</button>
+        <button class="tool" data-t="fill" title="flood fill">🪣</button>
+        <button class="tool" data-t="picker" title="pick color">💧</button>
+      </div>
+      <div class="rail-label">palette</div>
+      <div id="palette" class="palette"></div>
+      <div class="rail-label">canvas</div>
+      <div class="tool-grid">
+        <button class="tool" id="btnUndo" title="undo">↶</button>
+        <button class="tool" id="btnRedo" title="redo">↷</button>
+        <button class="tool" id="btnClear" title="clear to background">🗑</button>
+        <button class="tool active" id="btnGrid" title="toggle grid">▦</button>
+      </div>
+      <div class="rail-label">export</div>
+      <button id="btnPng" class="rail-btn">⤓ PNG 256px</button>
+    </aside>
+
+    <!-- ===== center: the canvas ===== -->
+    <section id="stage">
+      <div id="canvasWrap">
+        <canvas id="board" width="32" height="32"></canvas>
+        <canvas id="grid" width="32" height="32"></canvas>
+      </div>
+      <div id="stageNote">32×32 · paint with the tools, or let the forge fill it</div>
+    </section>
+
+    <!-- ===== right: the AI forge ===== -->
+    <aside id="forge" class="rail">
+      <div class="rail-label">the forge · 32×32 diffusion trained from zero</div>
+      <input id="pxPrompt" type="text" placeholder="describe it — anything: “a crystal castle at dusk”" autocomplete="off">
+      <div class="forge-row">
+        <label class="fld">seed
+          <input id="pxSeed" type="number" value="7" min="0" max="99999">
+          <button id="btnDice" class="mini" title="random seed">🎲</button>
+        </label>
+        <label class="fld">steps
+          <select id="pxSteps"><option>20</option><option selected>40</option><option>60</option></select>
+        </label>
+      </div>
+      <label class="fld wide">wildness <span id="pxTempV">1.15</span>
+        <input id="pxTemp" type="range" min="0.7" max="1.4" step="0.05" value="1.15">
+      </label>
+      <div class="forge-btns">
+        <button id="btnForge" class="forge-btn main" disabled>✨ Forge from noise</button>
+        <button id="btnVar" class="forge-btn" disabled>🔁 Variation</button>
+      </div>
+      <label class="fld wide">remix strength <span id="pxStrV">0.55</span>
+        <input id="pxStr" type="range" min="0.15" max="0.85" step="0.05" value="0.55">
+      </label>
+      <button id="btnRemix" class="forge-btn" disabled>🪄 Remix the canvas</button>
+      <div id="pxStatus" class="px-status">loading diffusion weights…</div>
+      <div class="rail-label">gallery <span class="dim">(session)</span></div>
+      <div id="gallery" class="gallery"><div class="gal-empty">forged pieces land here</div></div>
+    </aside>
+
+  </main>
+</div>
+<script src="../ort.min.js"></script>
+<script src="../ai.js"></script>
+<script src="studio.js"></script>
+</body>
+</html>

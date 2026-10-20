@@ -133,42 +133,58 @@
     });
   }
 
-  /* ---------------- DICE — locked: 2 dice, 3 rounds ---------------- */
+    /* ---------------- DICE — locked: 2 dice, 3 rounds, grouped table ---------------- */
   function dice(aiLine){
-    const p = panel("Dice Duel", "2 dice per throw · 3 rounds · highest total takes the round", `
-      <div class="dice-row">
-        <button class="rps-btn" id="dRoll" style="font-size:16px;flex:0 0 auto;padding:10px 18px">🎲 Roll</button>
-        <div class="die" id="d0">·</div><div class="die" id="d1">·</div>
-        <div class="die" id="d2">·</div><div class="die" id="d3">·</div>
-      </div>
-      <div class="score" id="dScore">round 1 of 3 — you 0 · ai 0</div>
-      <div class="score" id="dFinal" style="min-height:0"></div>`);
-    say(p, aiLine || "Two dice, three rounds. Roll when ready.");
-    let round = 0, sc = {you:0, ai:0}, done = false;
-    const pips = ["·","⚀","⚁","⚂","⚃","⚄","⚅"];
-    const show = (vals) => vals.forEach((v,i)=>{ const d = p.querySelector("#d"+i); d.textContent = pips[v]; d.classList.remove("roll"); void d.offsetWidth; d.classList.add("roll"); });
-    p.querySelector("#dRoll").onclick = () => {
+    const p = panel("Dice Duel", "2 dice each throw \u00b7 3 rounds \u00b7 higher total takes the round", `
+      <div class="dice-table">
+        <div class="dice-side"><div class="dice-who">you</div>
+          <div class="dice-pair"><div class="die" id="dY0">\u2013</div><div class="die" id="dY1">\u2013</div>
+          <div class="dice-sum" id="dYs">\u2013</div></div>
+          <div class="dice-tally" id="dYw">0 rounds</div></div>
+        <div class="dice-mid">
+          <div class="dice-round" id="dRound">round 1 / 3</div>
+          <button class="dice-roll" id="dRoll">\ud83c\udfb2 Roll</button>
+          <div class="dice-verdict" id="dVerdict"></div>
+        </div>
+        <div class="dice-side"><div class="dice-who">sigma</div>
+          <div class="dice-pair"><div class="die" id="dA0">\u2013</div><div class="die" id="dA1">\u2013</div>
+          <div class="dice-sum" id="dAs">\u2013</div></div>
+          <div class="dice-tally" id="dAw">0 rounds</div></div>
+      </div>`);
+    say(p, aiLine || "Two dice, three rounds. Roll.");
+    let round = 1, youWins = 0, aiWins = 0, done = false;
+    const pips = ["\u2680","\u2681","\u2682","\u2683","\u2684","\u2685"];
+    const el = id => p.querySelector(id);
+    const paint = (id, v) => { const d = el(id); d.textContent = pips[v-1];
+      d.classList.remove("roll"); void d.offsetWidth; d.classList.add("roll"); };
+    el("#dRoll").onclick = () => {
       if (done) return;
-      const mine = [1+Math.floor(Math.random()*6), 1+Math.floor(Math.random()*6)];
+      const mine   = [1+Math.floor(Math.random()*6), 1+Math.floor(Math.random()*6)];
       const theirs = [1+Math.floor(Math.random()*6), 1+Math.floor(Math.random()*6)];
-      show([mine[0], mine[1], theirs[0], theirs[1]]);
-      const ms = mine[0]+mine[1], ts = theirs[0]+theirs[1];
-      let msg = `round ${round+1}: you ${mine.join("+")}=${ms} vs ai ${theirs.join("+")}=${ts} — `;
-      if (ms > ts){ sc.you++; msg += "round is yours!"; }
-      else if (ts > ms){ sc.ai++; msg += "round to the model."; }
-      else { msg += "dead tie, no score."; }
-      round++;
-      p.querySelector("#dScore").textContent =
-        round < 3 ? `round ${round+1} of 3 — you ${sc.you} · ai ${sc.ai}` : `final — you ${sc.you} · ai ${sc.ai}`;
+      paint("#dY0",mine[0]); paint("#dY1",mine[1]); paint("#dA0",theirs[0]); paint("#dA1",theirs[1]);
+      const ms = mine[0]+mine[1], as = theirs[0]+theirs[1];
+      el("#dYs").textContent = ms; el("#dAs").textContent = as;
+      let v, line;
+      if (ms > as){ youWins++; v = "you take the round."; }
+      else if (as > ms){ aiWins++; v = "sigma takes the round."; }
+      else v = "dead tie \u2014 nobody scores.";
+      el("#dYw").textContent = youWins + (youWins === 1 ? " round" : " rounds");
+      el("#dAw").textContent = aiWins + (aiWins === 1 ? " round" : " rounds");
       if (round >= 3){
         done = true;
-        msg += sc.you > sc.ai ? " GAME OVER: you win 3 rounds of dice! GG!"
-             : sc.ai > sc.you ? " GAME OVER: the model wins this one. Rematch?"
-             : " GAME OVER: all square. Dead even.";
-        p.querySelector("#dRoll").textContent = "🎲 Rematch";
-        p.querySelector("#dRoll").onclick = () => { closeAll(); dice("Fresh board. Two dice, three rounds. Roll."); };
+        line = `Round 3: ${mine.join("+")}=${ms} vs ${theirs.join("+")}=${as}. ${v} ` +
+          (youWins > aiWins ? `FINAL: you win ${youWins}\u2013${aiWins}. Rematch?`
+           : aiWins > youWins ? `FINAL: sigma wins ${aiWins}\u2013${youWins}. Rematch?`
+           : "FINAL: all square \u2014 draw.");
+        el("#dVerdict").textContent = youWins > aiWins ? "you win" : aiWins > youWins ? "sigma wins" : "draw";
+        const rb = el("#dRoll"); rb.textContent = "\u21bb again";
+        rb.onclick = () => { closeAll(); dice("Fresh board. Two dice, three rounds. Roll."); };
+      } else {
+        line = `Round ${round}: ${ms} vs ${as} \u2014 ${v}`;
+        round++;
+        el("#dRound").textContent = `round ${round} / 3`;
       }
-      say(p, msg);
+      say(p, line);
     };
   }
 

@@ -1,3 +1,9 @@
+/* resolve asset base from this script's own URL so the standalone surfaces
+ * (shakespeagma/, studio/) reuse the same runtime + cached weights */
+const SIGMA_BASE = (document.currentScript && document.currentScript.src
+  ? document.currentScript.src.replace(/ai\.js(\?.*)?$/, "")
+  : "./");
+
 /* SIGMA AI runtime: word tokenizer (1:1 port of the Python tokenizer) +
  * ONNX inference with a KV cache (prefill once, then 1 token per step —
  * this is what makes real token-by-token streaming possible on CPU),
@@ -21,7 +27,7 @@ function rawTokens(text){
 
 class Tok {
   constructor(itos){ this.itos = itos; this.stoi = {}; itos.forEach((w,i)=>this.stoi[w]=i); }
-  static async load(){ const itos = await (await fetch("models/vocab3.json")).json(); return new Tok(itos); }
+  static async load(){ const itos = await (await fetch(SIGMA_BASE + "models/vocab3.json")).json(); return new Tok(itos); }
   /* one raw token -> ids. OOV ascii words are spelled letter-by-letter so the
    * model can READ and COPY arbitrary user text (names, tags, anything). */
   wordIds(w){
@@ -322,13 +328,15 @@ async function fetchWithProgress(url, onProgress, tries = 3){
 /* big checkpoints ship as byte-split shards (github 100MB/file limit):
  * fetch parts sequentially, concat into one buffer, progress is aggregate */
 const SHARDS = { "v10": 3, "50m": 3, "100m": 5, "px": 2 };
+const FNAME = { "px": "pixel" };    // session key -> file base (export writes pixel.onnx.part*)
 async function fetchModelBuf(size, onProgress){
+  const f = FNAME[size] || size;
   const n = SHARDS[size] || 1;
-  if (n === 1) return fetchWithProgress(`models/${size}.onnx`, onProgress);
+  if (n === 1) return fetchWithProgress(SIGMA_BASE + `models/${f}.onnx`, onProgress);
   const parts = [];
   for (let i = 1; i <= n; i++){
     const base = i / n - (1 / n);                       // progress offset of this part
-    parts.push(await fetchWithProgress(`models/${size}.onnx.part${i}`,
+    parts.push(await fetchWithProgress(SIGMA_BASE + `models/${f}.onnx.part${i}`,
                  p => onProgress && onProgress(base + p / n)));
   }
   const tot = parts.reduce((s, b) => s + b.byteLength, 0);

@@ -8,11 +8,13 @@
  *  - shell assets install one-by-one (one 404 no longer kills the whole SW)
  *  - range requests pass straight through (streaming consumers keep working)
  *  - stale-while-revalidate for same-origin assets so updates propagate */
-const SHELL = "sigma-shell-v8";
+const SHELL = "sigma-shell-v10";
 const MODELS = "sigma-models-v6";   // v6: char-copy 22m + shard-ready 50m
 const SHELL_ASSETS = ["./", "index.html", "style.css", "app.js", "ai.js", "pixel.js", "games.js",
   "manifest.json", "ort.min.js", "ort-wasm-simd-threaded.wasm", "ort-wasm-simd-threaded.mjs",
-  "icons/icon-192.png", "icons/icon-512.png"];
+  "icons/icon-192.png", "icons/icon-512.png",
+  "shakespeagma/index.html", "shakespeagma/shakespeagma.css", "shakespeagma/shakespeagma.js",
+  "studio/index.html", "studio/studio.css", "studio/studio.js"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil((async () => {

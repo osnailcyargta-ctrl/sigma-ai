@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>SHAKESPEAGMA — the word forge</title>
+<meta name="description" content="Sigma AI's word forge — Shakespearean verse, stage prose and Socratic inquiry, generated live by a real transformer.">
+<link rel="manifest" href="../manifest.json">
+<link rel="icon" href="../icons/icon-192.png">
+<meta name="theme-color" content="#1c1917">
+<link rel="stylesheet" href="shakespeagma.css">
+</head>
+<body>
+<div id="wrap">
+
+  <header id="top">
+    <nav class="mode-switch" aria-label="mode">
+      <button class="mode-tab" onclick="location.href='../'">Sigma Chat</button>
+      <button class="mode-tab active">Shakespeagma</button>
+      <button class="mode-tab" onclick="location.href='../studio/'">Pixel Studio</button>
+    </nav>
+    <div id="state" class="state">idle</div>
+  </header>
+
+  <div class="hero">
+    <div class="hero-mark">Ꝯ</div>
+    <h1>Shakespeagma</h1>
+    <p class="hero-sub">the word forge of sigma — verse, stage prose and socratic inquiry,<br>
+    spun live by the same transformer that chats. no templates. every word sampled.</p>
+  </div>
+
+  <main id="works">
+    <div id="emptyNote" class="empty-note">
+      <p>Nothing forged yet. Speak to the bard — ask, praise, mourn, summon verse,</p>
+      <p>or tap a quill below and he shall begin.</p>
+    </div>
+  </main>
+
+  <footer id="forge-bar">
+    <div class="forge-row">
+      <div class="style-pick" id="stylePick">
+        <button data-q="talk like shakespeare" class="style-btn">Summon verse</button>
+        <button data-q="what is wisdom" class="style-btn">Ask socrates</button>
+        <button data-q="give me 3 dog names, but make it shakespeare" class="style-btn">A bard's list</button>
+      </div>
+      <div class="len-pick" id="lenPick">
+        <button data-l="48" class="len-btn">short</button>
+        <button data-l="90" class="len-btn active">medium</button>
+        <button data-l="150" class="len-btn">long</button>
+      </div>
+    </div>
+    <div class="forge-row main">
+      <textarea id="topic" rows="1" placeholder="speak to the bard — greet, ask, mourn, summon verse…"></textarea>
+      <button id="btnForge" disabled>Forge ✒</button>
+    </div>
+    <div class="forge-hint">every reply is sampled live by the net — the same subject forges anew each time</div>
+  </footer>
+
+</div>
+<script src="../ort.min.js"></script>
+<script src="../ai.js"></script>
+<script src="shakespeagma.js"></script>
+</body>
+</html>

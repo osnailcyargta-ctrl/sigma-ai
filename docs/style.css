@@ -100,6 +100,21 @@ body{margin:0;font:15px/1.55 "Segoe UI",system-ui,-apple-system,sans-serif;color
 .dice-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .die{width:52px;height:52px;border:1px solid var(--line);border-radius:12px;background:#fafafa;display:grid;place-items:center;font-size:24px;font-weight:800}
 .die.roll{animation:tumble .5s ease}
+
+/* dice duel — grouped table (2 dice, 3 rounds) */
+.dice-table{display:flex;gap:14px;align-items:stretch;justify-content:space-between}
+.dice-side{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;background:#fafafa;border:1px solid var(--line);border-radius:14px;padding:12px 8px}
+.dice-who{font-size:11px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;color:var(--ink2)}
+.dice-pair{display:flex;gap:8px;align-items:center}
+.dice-sum{font-size:20px;font-weight:800;color:var(--ink);min-width:26px;text-align:center}
+.dice-tally{font-size:11px;color:var(--ink2)}
+.dice-mid{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-width:120px}
+.dice-round{font-size:12px;font-weight:700;color:var(--ink2)}
+.dice-roll{border:0;background:#18181b;color:#fff;border-radius:12px;padding:10px 18px;font-size:15px;font-weight:700;cursor:pointer}
+.dice-roll:disabled{background:#d4d4d8}
+.dice-verdict{font-size:13px;font-weight:700;min-height:18px}
+body.mode-shakes .dice-side{background:#fbf7ec}
+@media (max-width:560px){.dice-table{flex-direction:column}.dice-mid{flex-direction:row;width:100%}}
 @keyframes tumble{0%{transform:rotate(0) scale(1)}50%{transform:rotate(200deg) scale(.8)}100%{transform:rotate(360deg) scale(1)}}
 .game-line{margin-top:10px;font-size:13px;color:var(--ink)}
 .score{font-size:12px;color:var(--ink2);margin-top:6px}

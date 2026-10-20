@@ -12,42 +12,27 @@
             ? localStorage.getItem("sigma.size") : "v10",
     pers: localStorage.getItem("sigma.pers") || "sigma",
     custom: localStorage.getItem("sigma.custom") || "",
-    mode: localStorage.getItem("sigma.mode") || "chat",   // chat | shakes (Claude-style switch)
     history: [],          // [{u, a}] working memory (context window)
     sessionMems: [],      // the model's OWN <mem> writes this session — always replayed
     model: null, tk: null, loading: false,
     generating: false, abort: false, lastSend: 0,
   };
 
-  /* ---------------- mode switch (Sigma Chat <-> Shakespeare-GMA) ---------------- */
-  const MODE_META = {
-    chat:   { label: "Sigma Chat",     ico: "Σ", pers: null,
-              ph: "Message SIGMA — or invite it to a game..." },
-    shakes: { label: "Shakespeare-GMA", ico: "✒", pers: "shakespeare",
-              ph: "Speak, friend — verse & wisdom await..." },
-  };
+  /* ---------------- mode menu (Claude-style) ----------------
+   * Sigma Chat lives here; Shakespeagma and Pixel Studio are standalone
+   * surfaces (their own pages, no sidebar) — the menu navigates to them. */
+  document.querySelectorAll(".mode-item[data-mode]").forEach(x => x.classList.add("active"));
+
   function setMode(m){
-    state.mode = m; localStorage.setItem("sigma.mode", m);
-    const meta = MODE_META[m];
-    document.body.classList.toggle("mode-shakes", m === "shakes");
-    $("#modeName").textContent = meta.label;
-    $("#modeIco").textContent = meta.ico;
-    $("#input").placeholder = meta.ph;
-    document.querySelectorAll(".mode-item").forEach(x => x.classList.toggle("active", x.dataset.mode === m));
-    chipPers.textContent = m === "shakes" ? "shakespeare-gma" : state.pers;
+    document.querySelectorAll(".mode-item[data-mode]").forEach(x =>
+      x.classList.toggle("active", x.dataset.mode === m));
     $("#modeMenu").classList.remove("open");
   }
-  /* the persona actually fed to the network for the current mode. Shakespeare
-   * uses the trained <pers:shakespeare> token on checkpoints that have it; on
-   * older tables it degrades to <pers:custom> + a style hint (still real
-   * conditioning, no tag matching). */
+
+  /* the persona fed to the network: the sidebar pick (sigma / fake / custom).
+   * Shakespeare-GMA lives on its own page with the trained persona token. */
   function modePersona(){
-    const meta = MODE_META[state.mode];
-    if (!meta.pers) return { tok: state.pers, hint: "" };
-    if (state.model && state.model.supportsPers("shakespeare"))
-      return { tok: "shakespeare", hint: "" };
-    return { tok: "custom",
-             hint: "you speak in grand verse like shakespeare and ask wise questions like socrates<nl>" };
+    return { tok: state.pers, hint: "" };
   }
 
   /* ---------------- long-term memory (IndexedDB vector store) ---------------- */
@@ -163,7 +148,6 @@
                  "v10":"50,526,720 params · ctx 512 · lists · stop · board-play ttt · shakespeare-gma · flagship"};
       $("#modelInfo").textContent = P[size] || "";
       GAMES_setRuntime(m, state.pers);          // games can open before any send
-      setMode(state.mode);                      // refresh persona chip for the mode
       loadState.textContent = `${size} ready`;
       setBtn("idle");
     } catch (err) {
@@ -334,7 +318,7 @@
 
   document.querySelectorAll("#modelSeg button").forEach(b => b.onclick = () => { if (!state.generating) loadModel(b.dataset.m); });
 
-  document.querySelectorAll(".mode-item").forEach(x => x.onclick = () => setMode(x.dataset.mode));
+  document.querySelectorAll(".mode-item[data-mode]").forEach(x => x.onclick = () => setMode(x.dataset.mode));
   $("#btnMode").onclick = (e) => { e.stopPropagation(); $("#modeMenu").classList.toggle("open"); };
   document.addEventListener("click", (e) => {
     if (!$("#modeWrap").contains(e.target)) $("#modeMenu").classList.remove("open");
@@ -345,76 +329,12 @@
     document.querySelectorAll(".pers-item").forEach(x => x.classList.toggle("active", x.dataset.p === p));
     $("#customPrompt").style.display = p === "custom" ? "block" : "none";
     chipPers.textContent = p === "custom" ? "custom" : p;
-    if (state.mode === "shakes") setMode("chat");    // persona pick leaves shakes mode
   }
   document.querySelectorAll(".pers-item").forEach(x => x.onclick = () => setPers(x.dataset.p));
   $("#customPrompt").addEventListener("input", e => { state.custom = e.target.value; localStorage.setItem("sigma.custom", state.custom); });
 
   $("#btnClearMem").onclick = async () => { await MEM.clear(); refreshMemList(); };
 
-  /* ---------------- pixel art studio (32x32 diffusion, real generation) ---------------- */
-  const PX = { gen: null, loading: false, busy: false };
-  async function pixelStudio(){
-    GAMES.closeAll();
-    const dock = document.getElementById("gameDock");
-    const p = document.createElement("div");
-    p.className = "game pixel-game";
-    p.innerHTML = `
-      <div class="game-head"><div class="game-title">Pixel Studio</div>
-        <div class="game-note">32×32 diffusion · denoises pure noise · every image unique</div>
-        <button class="game-x" title="close">✕</button></div>
-      <div class="px-row">
-        <div class="px-classes">${SIGMA_PIXEL.CLASSES.map((c,i) =>
-          `<button class="px-cls${i===0?" active":""}" data-c="${i}">${c}</button>`).join("")}</div>
-        <button class="rps-btn" id="pxGo" style="flex:0 0 auto;padding:10px 16px">✨ Generate</button>
-      </div>
-      <div class="px-canvas-wrap"><canvas id="pxCanvas" width="256" height="256"></canvas>
-        <div id="pxStatus" class="px-status">weights not loaded yet</div></div>
-      <div class="px-actions"><a id="pxDl" class="px-dl" download="sigma-pixel.png" style="display:none">⤓ Download PNG</a></div>`;
-    p.querySelector(".game-x").onclick = () => dock.innerHTML = "";
-    dock.appendChild(p);
-    dock.scrollIntoView({behavior:"smooth", block:"end"});
-    const status = p.querySelector("#pxStatus"), canvas = p.querySelector("#pxCanvas");
-    const ctx = canvas.getContext("2d");
-    ctx.imageSmoothingEnabled = false;
-    let cls = 0;
-    p.querySelectorAll(".px-cls").forEach(b => b.onclick = () => {
-      cls = +b.dataset.c;
-      p.querySelectorAll(".px-cls").forEach(x => x.classList.toggle("active", x === b));
-    });
-    /* lazy-load weights on first open */
-    if (!PX.gen && !PX.loading){
-      PX.loading = true;
-      status.textContent = "loading diffusion weights…";
-      try {
-        PX.gen = await SIGMA_PIXEL.PixelGen.load(pr => {
-          status.textContent = `loading diffusion weights… ${Math.round(pr*100)}%`;
-        });
-        status.textContent = "ready — pick a subject and generate";
-      } catch (e){ console.error(e); status.textContent = "load failed — check connection, it caches after"; }
-      PX.loading = false;
-    }
-    p.querySelector("#pxGo").onclick = async () => {
-      if (!PX.gen || PX.busy) return;
-      PX.busy = true;
-      const btn = p.querySelector("#pxGo"); btn.disabled = true;
-      try {
-        const img = await PX.gen.generate(cls, { steps: 40, temp: 1.1, onStep: (i, n) => {
-          status.textContent = `denoising… step ${i}/${n}`;
-        }});
-        const off = new OffscreenCanvas(32, 32);
-        off.getContext("2d").putImageData(new ImageData(img, 32, 32), 0, 0);
-        ctx.imageSmoothingEnabled = false;
-        ctx.clearRect(0, 0, 256, 256);
-        ctx.drawImage(off, 0, 0, 256, 256);
-        status.textContent = `done — a ${SIGMA_PIXEL.CLASSES[cls]} invented from noise`;
-        const dl = p.querySelector("#pxDl");
-        dl.href = canvas.toDataURL("image/png"); dl.style.display = "inline-block";
-      } catch (e){ console.error(e); status.textContent = "generation hiccup: " + e.message; }
-      btn.disabled = false; PX.busy = false;
-    };
-  }
-  $("#btnPixel").onclick = pixelStudio;
   $("#btnNew").onclick = () => {
     if (state.generating) state.abort = true;
     state.history = [];
@@ -437,7 +357,6 @@
   /* boot */
   $("#customPrompt").value = state.custom;
   setPersInit();
-  setMode(state.mode);
   greet();
   MEM.open().then(refreshMemList);
   loadModel(state.size);
